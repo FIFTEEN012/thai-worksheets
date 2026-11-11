@@ -60,6 +60,12 @@ window.OPENWORKSHEETS_CONFIG = {
   // No se puede importar el sistema i18n (config.js es un script plano que se
   // carga antes), así que se replica aquí la detección de idioma y los textos.
   const NOTICE_I18N = {
+    th: {
+      lead: 'ต้องตั้งค่าเพิ่มเติม',
+      body: 'สำเนา OpenWorksheets นี้ไม่ได้รันบนเว็บไซต์ต้นฉบับ จึงปิดการสร้างลิงก์แบบสั้นไว้ เพื่อไม่ให้ใช้บัญชี Google ของผู้อื่น ให้ติดตั้ง Google Apps Script ของคุณเองแล้วใส่ URL ใน <code>config.js</code>',
+      link: 'ดูวิธีตั้งค่า (gas/README.md)',
+      close: 'ปิดข้อความแจ้งเตือน'
+    },
     es: {
       lead: 'Configuración pendiente.',
       body: 'Esta copia de OpenWorksheets no se ejecuta en el sitio oficial, así que la generación de enlaces cortos está desactivada para no usar la cuenta de Google de otra persona. Despliega tu propio Google Apps Script y pon tu URL en <code>config.js</code>.',
@@ -98,7 +104,7 @@ window.OPENWORKSHEETS_CONFIG = {
     try { stored = localStorage.getItem('wpf-lang'); } catch (_) { /* ignore */ }
     if (stored && avail.includes(stored)) return stored;
     const browser = ((navigator.language || 'es').slice(0, 2)).toLowerCase();
-    return avail.includes(browser) ? browser : 'es';
+    return 'th'; // ฉบับภาษาไทย: ค่าเริ่มต้นเป็นภาษาไทย
   }
 
   function showNotice() {
