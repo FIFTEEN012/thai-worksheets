@@ -41,6 +41,7 @@ import { iconBtn, colorInput } from './editor-ui.js';
 import { state, urls, fileUrl, markDirty, onDirty } from './editor-state.js';
 import { takeFile } from './filehandoff.js';
 import { layoutFields } from './aiimport.js';
+import { classList } from './onlinesubmit.js';
 import { openAiDialog } from './aiui.js';
 import { openMcpDialog } from './mcpui.js';
 
@@ -5215,6 +5216,11 @@ function openSettings(afterSave, initialTab = 'basic') {
   $('#ajBarajar').checked = Boolean(state.manifest.settings.shuffle);
   $('#ajFormulaBtn').checked = state.manifest.settings.showFormulaButton !== false;
   $('#ajIntentos').value = String(state.manifest.settings.maxAttempts || 0);
+  // ฉบับภาษาไทย: ส่งคะแนนออนไลน์และรายชื่อห้อง
+  const onl = state.manifest.settings.onlineSubmit || {};
+  $('#ajOnline').checked = Boolean(onl.enabled);
+  $('#ajClases').value = classList(onl.classes).join('\n');
+  $('#ajOnlineNoGas').hidden = Boolean(window.OPENWORKSHEETS_CONFIG?.gasUrl || onl.url);
   $('#ajCifrarEntregas').checked = state.manifest.settings.encryptSubmissions === true;
   $('#ajSecurityMeter').checked = state.manifest.settings.securityMeter !== false;
   $('#ajCryptoPassword').value = state.submissionCryptoPassword;
@@ -5284,6 +5290,15 @@ $('#dlgAjustes')?.addEventListener('close', () => {
   state.manifest.settings.shuffle = $('#ajBarajar').checked;
   state.manifest.settings.showFormulaButton = $('#ajFormulaBtn').checked;
   state.manifest.settings.maxAttempts = Math.max(0, parseInt($('#ajIntentos').value, 10) || 0);
+  {
+    const prevUrl = state.manifest.settings.onlineSubmit?.url || '';
+    state.manifest.settings.onlineSubmit = {
+      enabled: $('#ajOnline').checked,
+      // เก็บ URL ไว้ในใบงาน เพื่อให้ส่งคะแนนได้แม้เปิดใบงานจากเว็บอื่น
+      url: window.OPENWORKSHEETS_CONFIG?.gasUrl || prevUrl,
+      classes: classList($('#ajClases').value)
+    };
+  }
   state.manifest.settings.keepFullscreen = $('#ajKeepFullscreen').checked;
   // La vigilancia (qué hacer al salir + entrega automática) solo aplica con el
   // control de pantalla completa activado; si está desmarcado, se desactiva.

@@ -5223,7 +5223,7 @@ export function setLang(code, { save = true, reload = true } = {}) {
 
 export function t(key, vars = {}) {
   const lang = getLang();
-  const str = (STRINGS[lang]?.[key]) ?? (STRINGS.en?.[key]) ?? (STRINGS.es?.[key]) ?? key;
+  const str = (STRINGS[lang]?.[key]) ?? (STRINGS.en?.[key]) ?? (STRINGS.es?.[key]) ?? (STRINGS.th?.[key]) ?? key;
   return str.replace(/\{(\w+)\}/g, (_, k) => (vars[k] !== undefined ? String(vars[k]) : '{' + k + '}'));
 }
 

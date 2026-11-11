@@ -155,6 +155,15 @@
           <label class="check-row"><input type="checkbox" id="ajBarajar"> <span data-i18n="dlg.settings.shuffle">Barajar las opciones de las preguntas</span></label>
           <label class="f-label" for="ajIntentos" data-i18n="dlg.settings.attempts">Intentos permitidos (0 = ilimitados)</label>
           <input type="number" id="ajIntentos" min="0" step="1" value="0">
+          <h3 class="settings-subhead" data-i18n="dlg.online.section">ส่งคะแนนให้ครูออนไลน์</h3>
+          <label class="check-row"><input type="checkbox" id="ajOnline"> <span data-i18n="dlg.online.enable">ส่งคะแนนให้ครูอัตโนมัติ</span></label>
+          <p id="ajOnlineHint"><small data-i18n="dlg.online.hint"></small></p>
+          <p id="ajOnlineNoGas" style="color:var(--rojo)" hidden><small data-i18n="dlg.online.noGas"></small></p>
+          <div id="ajOnlineBox">
+            <label class="f-label" for="ajClases" data-i18n="dlg.online.classes">รายชื่อห้องเรียน</label>
+            <textarea id="ajClases" rows="4" style="width:100%" data-i18n-placeholder="dlg.online.classesPh"></textarea>
+            <p><small data-i18n="dlg.online.classesHint"></small></p>
+          </div>
         </section>
         <section class="settings-panel" id="ajPanelAccess" role="tabpanel" data-panel="access" hidden>
           <div class="settings-two">

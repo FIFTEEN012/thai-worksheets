@@ -1006,5 +1006,21 @@ export const TH = {
   "crypto.decryptContinue": "เปิดงานที่ส่ง",
   "crypto.rememberPasswordLabel": "จำไว้ในเซสชันนี้เพื่อเปิดงานที่ส่งเพิ่มเติม",
   "crypto.decryptError": "ถอดรหัสงานที่ส่งไม่ได้ ตรวจสอบรหัสผ่าน",
-  "alumno.encryptedDesc": "ใบงานนี้ถูกป้องกัน พิมพ์รหัสผ่านที่ครูให้มาเพื่อเปิดใบงาน"
+  "alumno.encryptedDesc": "ใบงานนี้ถูกป้องกัน พิมพ์รหัสผ่านที่ครูให้มาเพื่อเปิดใบงาน",
+  "player.chooseClass": "— เลือกห้อง —",
+  "player.classLabel": "ห้องเรียน *",
+  "player.chooseClassFirst": "เลือกห้องเรียนก่อนเริ่มทำ",
+  "player.onlineSending": "⏳ กำลังส่งคะแนนให้ครู…",
+  "player.onlineSent": "✓ ส่งคะแนนให้ครูเรียบร้อยแล้ว ไม่ต้องส่งไฟล์ซ้ำ",
+  "player.onlineFailed": "✗ ส่งคะแนนไม่สำเร็จ ({error}) กดลองใหม่ หรือดาวน์โหลดงานที่ส่งแล้วส่งให้ครูแทน",
+  "player.onlineRetry": "ลองส่งใหม่",
+  "player.onlineInfo": "คะแนนของคุณจะถูกส่งให้ครูโดยอัตโนมัติ หากส่งไม่สำเร็จ ให้กด <strong>ดาวน์โหลดงานที่ส่ง</strong> แล้วส่งไฟล์ให้ครู",
+  "dlg.online.section": "ส่งคะแนนให้ครูออนไลน์",
+  "dlg.online.enable": "ส่งคะแนนให้ครูอัตโนมัติเมื่อนักเรียนกดส่ง (บันทึกลง Google Sheets)",
+  "dlg.online.hint": "คะแนนจะถูกส่งไปยัง Google Apps Script ของคุณ แล้วบันทึกในสเปรดชีตใน Google Drive ดูคะแนนแยกตามห้องได้ที่หน้า «ดูคะแนน» ต้องเรียกใช้ฟังก์ชัน setupResults ใน Apps Script หนึ่งครั้งก่อน (ดู gas/README.th.md)",
+  "dlg.online.noGas": "เว็บนี้ยังไม่ได้ตั้งค่า Google Apps Script (gasUrl ใน config.js) จึงยังส่งคะแนนออนไลน์ไม่ได้",
+  "dlg.online.classes": "รายชื่อห้องเรียน (บรรทัดละหนึ่งห้อง)",
+  "dlg.online.classesPh": "ม.1/1\nม.1/2\nม.1/3",
+  "dlg.online.classesHint": "ถ้ากำหนดไว้ นักเรียนต้องเลือกห้องจากรายการก่อนเริ่มทำ ถ้าเว้นว่าง นักเรียนพิมพ์ห้องเอง",
+  "nav.results": "ดูคะแนน"
 };

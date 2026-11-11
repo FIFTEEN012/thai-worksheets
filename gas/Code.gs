@@ -31,7 +31,7 @@
  *   ?short=TOKEN                          → { token, url }  (resolve short link)
  */
 
-/* global ContentService, DriveApp, HtmlService, PropertiesService, CacheService, LockService, MimeType, UrlFetchApp, Utilities */
+/* global SpreadsheetApp, Logger, ContentService, DriveApp, HtmlService, PropertiesService, CacheService, LockService, MimeType, UrlFetchApp, Utilities */
 
 var SITE_ROOT_FOLDER = 'ZipWebSites';
 var MANIFEST_FILE = 'manifest.json';
@@ -64,6 +64,11 @@ function doGet(e) {
   var url = (e && e.parameter && e.parameter.url) ? e.parameter.url : '';
   var site = (e && e.parameter && e.parameter.site) ? e.parameter.site : '';
   var short = (e && e.parameter && e.parameter.short) ? e.parameter.short : '';
+
+  // ฉบับภาษาไทย: ครูอ่านคะแนน
+  if (e && e.parameter && e.parameter.results) {
+    return corsJsonOutput_(readResults_(e.parameter.key || ''));
+  }
 
   if (short) {
     if (short === '1' && url) {
@@ -1144,4 +1149,150 @@ function fetchRangeResponse_(url, start, end) {
 function looksLikeZipSignature_(bytes) {
   if (!bytes || bytes.length < 4) return false;
   return bytes[0] === 0x50 && bytes[1] === 0x4b && (bytes[2] === 0x03 || bytes[2] === 0x05 || bytes[2] === 0x07) && (bytes[3] === 0x04 || bytes[3] === 0x06 || bytes[3] === 0x08);
+}
+
+// ===========================================================================
+// ฉบับภาษาไทย: รับคะแนนจากนักเรียนและบันทึกลง Google Sheets
+// ===========================================================================
+//
+// - นักเรียนส่งคะแนนด้วย POST (Content-Type: text/plain เพื่อไม่ต้องมี preflight)
+//   body = { action: 'submit', data: { …งานที่ส่ง… } }
+// - ครูอ่านคะแนนด้วย GET ?results=1&key=รหัสครู
+// - เรียกใช้ฟังก์ชัน setupResults() หนึ่งครั้งในตัวแก้ไข Apps Script เพื่อสร้าง
+//   สเปรดชีตและรับ «รหัสครู» (ดูใน «บันทึกการดำเนินการ / Execution log»)
+
+var RESULTS_SHEET_ID_KEY = 'results_sheet_id';
+var RESULTS_TEACHER_KEY = 'results_teacher_key';
+var RESULTS_SHEET_NAME = 'คะแนน';
+var RESULTS_SPREADSHEET_TITLE = 'OpenWorksheets ภาษาไทย - คะแนนนักเรียน';
+var RESULTS_HEADERS = ['เวลาส่ง', 'ใบงาน', 'รหัสใบงาน', 'ห้อง', 'ชื่อนักเรียน', 'คะแนน', 'คะแนนเต็ม',
+  'คะแนน/10', 'ร้อยละ', 'รอครูตรวจ', 'ออกจากหน้าจอ (ครั้ง)', 'รหัสตรวจสอบ', 'รายละเอียดคำตอบ (JSON)'];
+
+function setupResults() {
+  var ss = getResultsSpreadsheet_();
+  var props = PropertiesService.getScriptProperties();
+  var key = props.getProperty(RESULTS_TEACHER_KEY);
+  if (!key) {
+    key = randomKey_(10);
+    props.setProperty(RESULTS_TEACHER_KEY, key);
+  }
+  var msg = 'สเปรดชีตคะแนน: ' + ss.getUrl() + '\nรหัสครู (ใช้เข้าหน้าดูคะแนน): ' + key;
+  Logger.log(msg);
+  return msg;
+}
+
+// สร้างรหัสครูใหม่ (รหัสเดิมจะใช้ไม่ได้)
+function resetTeacherKey() {
+  PropertiesService.getScriptProperties().deleteProperty(RESULTS_TEACHER_KEY);
+  return setupResults();
+}
+
+function randomKey_(n) {
+  var chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
+  var out = '';
+  for (var i = 0; i < n; i++) out += chars.charAt(Math.floor(Math.random() * chars.length));
+  return out;
+}
+
+function getResultsSpreadsheet_() {
+  var props = PropertiesService.getScriptProperties();
+  var id = props.getProperty(RESULTS_SHEET_ID_KEY);
+  var ss = null;
+  if (id) {
+    try { ss = SpreadsheetApp.openById(id); } catch (err) { ss = null; }
+  }
+  if (!ss) {
+    ss = SpreadsheetApp.create(RESULTS_SPREADSHEET_TITLE);
+    props.setProperty(RESULTS_SHEET_ID_KEY, ss.getId());
+    var first = ss.getSheets()[0];
+    first.setName(RESULTS_SHEET_NAME);
+  }
+  var sh = ss.getSheetByName(RESULTS_SHEET_NAME) || ss.insertSheet(RESULTS_SHEET_NAME);
+  if (sh.getLastRow() === 0) {
+    sh.appendRow(RESULTS_HEADERS);
+    sh.setFrozenRows(1);
+    sh.getRange(1, 1, 1, RESULTS_HEADERS.length).setFontWeight('bold');
+  }
+  return ss;
+}
+
+// กันสูตรใน Google Sheets (เช่น ชื่อที่ขึ้นต้นด้วย = ) และจำกัดความยาว
+function cellText_(v, max) {
+  var s = String(v === null || v === undefined ? '' : v).slice(0, max || 500);
+  return /^[=+\-@]/.test(s) ? "'" + s : s;
+}
+
+function doPost(e) {
+  var body = {};
+  try {
+    body = JSON.parse((e && e.postData && e.postData.contents) || '{}');
+  } catch (err) {
+    return corsJsonOutput_({ ok: false, error: 'รูปแบบข้อมูลไม่ถูกต้อง' });
+  }
+  if (body.action === 'submit') return corsJsonOutput_(saveSubmission_(body.data));
+  return corsJsonOutput_({ ok: false, error: 'ไม่รู้จักคำสั่ง' });
+}
+
+function saveSubmission_(d) {
+  if (!d || d.formato !== 'workpdf-entrega' || !d.alumno || !d.fichaId) {
+    return { ok: false, error: 'ข้อมูลงานที่ส่งไม่ครบ' };
+  }
+  var nota = Number(d.nota) || 0;
+  var total = Number(d.total) || 0;
+  var respuestas = Array.isArray(d.respuestas) ? d.respuestas : [];
+  var pendientes = respuestas.filter(function (r) { return r && r.resultado === 'pendiente'; }).length;
+  var vig = d.vigilancia && Number(d.vigilancia.count) || 0;
+  var detalle = JSON.stringify(respuestas.map(function (r) {
+    return {
+      p: r.pagina, t: r.tipo,
+      a: String(r.respuestaTexto !== undefined ? r.respuestaTexto : (typeof r.respuesta === 'string' ? r.respuesta : '')).slice(0, 300),
+      e: r.puntos, m: r.maximo, r: r.resultado
+    };
+  }));
+  if (detalle.length > 45000) detalle = detalle.slice(0, 45000);
+  var row = [
+    new Date(),
+    cellText_(d.titulo, 200),
+    cellText_(d.fichaId, 80),
+    cellText_(d.grupo, 60),
+    cellText_(d.alumno, 120),
+    nota,
+    total,
+    total > 0 ? Math.round(nota / total * 1000) / 100 : 0,
+    total > 0 ? Math.round(nota / total * 100) : 0,
+    pendientes,
+    vig,
+    cellText_(d.codigo, 40),
+    detalle
+  ];
+  var lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    getResultsSpreadsheet_().getSheetByName(RESULTS_SHEET_NAME).appendRow(row);
+  } finally {
+    lock.releaseLock();
+  }
+  return { ok: true };
+}
+
+function readResults_(key) {
+  var expected = PropertiesService.getScriptProperties().getProperty(RESULTS_TEACHER_KEY);
+  if (!expected) return { ok: false, error: 'ยังไม่ได้ตั้งค่า: เรียกใช้ฟังก์ชัน setupResults ใน Apps Script ก่อน' };
+  if (!key || key !== expected) return { ok: false, error: 'รหัสครูไม่ถูกต้อง' };
+  var ss = getResultsSpreadsheet_();
+  var sh = ss.getSheetByName(RESULTS_SHEET_NAME);
+  var values = sh.getDataRange().getValues();
+  var rows = [];
+  for (var i = 1; i < values.length; i++) {
+    var v = values[i];
+    var detalle = [];
+    try { detalle = JSON.parse(v[12] || '[]'); } catch (err) { detalle = []; }
+    rows.push({
+      fecha: v[0] instanceof Date ? v[0].toISOString() : String(v[0]),
+      titulo: String(v[1]), fichaId: String(v[2]), grupo: String(v[3]), alumno: String(v[4]),
+      nota: Number(v[5]) || 0, total: Number(v[6]) || 0, nota10: Number(v[7]) || 0, pct: Number(v[8]) || 0,
+      pendientes: Number(v[9]) || 0, vigilancia: Number(v[10]) || 0, codigo: String(v[11]), detalle: detalle
+    });
+  }
+  return { ok: true, sheetUrl: ss.getUrl(), rows: rows };
 }
