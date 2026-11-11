@@ -46,6 +46,13 @@ async function readBody(resp, onProgress) {
 function describeNotZip(bytes) {
   if (!bytes || !bytes.length) return 'ไม่ได้รับข้อมูล';
   const head = new TextDecoder().decode(bytes.slice(0, 120)).replace(/s+/g, ' ').trim();
+  const b = bytes;
+  const kind =
+    (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47) ? 'รูปภาพ PNG' :
+    (b[0] === 0xff && b[1] === 0xd8) ? 'รูปภาพ JPEG' :
+    (b[0] === 0x25 && b[1] === 0x50 && b[2] === 0x44 && b[3] === 0x46) ? 'ไฟล์ PDF' :
+    (b[0] === 0x52 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x46) ? 'รูปภาพ WEBP' : '';
+  if (kind) return 'ไฟล์นี้เป็น' + kind + ' ไม่ใช่ใบงาน (.owpkg): ให้เปิดไฟล์นี้ในตัวแก้ไข วางช่องคำตอบ แล้วกด ไฟล์ → บันทึกใบงาน (.owpkg) จากนั้นอัปโหลดไฟล์ .owpkg ขึ้น Drive แทน';
   if (/<!doctype html|<html/i.test(head)) return 'ได้หน้าเว็บ HTML แทนไฟล์ (มักเกิดเพราะไฟล์ไม่ได้แชร์แบบสาธารณะ)';
   return 'ได้ข้อมูลที่ไม่ใช่ ZIP (' + bytes.length + ' ไบต์): ' + head.slice(0, 60);
 }
