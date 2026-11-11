@@ -3,11 +3,12 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ห้องครู · OpenWorksheets ภาษาไทย</title>
+  <title>ห้องครู · PRS Worksheet</title>
   <meta name="description" content="บัญชีครู: ดูคะแนนที่นักเรียนส่งออนไลน์ แยกตามใบงานและห้องเรียน และเชื่อมต่อ AI ผ่าน MCP">
   <meta name="robots" content="noindex">
-  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="icon" href="graphics/logo.svg" type="image/svg+xml">
   <link rel="stylesheet" href="css/app.css">
+  <link rel="stylesheet" href="css/prs.css">
   <script>(function(){var t=localStorage.getItem('wpf-tema');if(t)document.documentElement.setAttribute('data-theme',t);})();</script>
   <style>
     .rs-auth { display: grid; gap: 10px; max-width: 420px; }
@@ -36,7 +37,7 @@
 <body>
 
   <header class="topbar">
-    <a class="brand" href="index.html" title="กลับหน้าหลัก">OpenWorksheets <span class="tag">ห้องครู</span></a>
+    <a class="brand" href="index.html" title="กลับหน้าหลัก">PRS Worksheet <span class="tag">ห้องครู</span></a>
     <span class="spacer"></span>
     <button class="btn small ghost" id="btnTema" title="ธีม: อัตโนมัติ (ตามระบบ)"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="btn-icon"><rect width="20" height="14" x="2" y="3" rx="2"/><path d="M8 21h8M12 17v4"/></svg></button>
     <a class="btn small" href="editor.html">สร้างใบงาน</a>
@@ -86,6 +87,11 @@
 
       <div class="rs-stats" id="rsStats"></div>
       <div class="rs-classsum class-table-wrap" id="rsClassSum"></div>
+      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:6px">
+        <h2 style="margin:0;font-size:1.2rem">🏆 ตารางผู้นำ</h2>
+        <label class="check-row" style="margin:0"><input type="checkbox" id="rsPublicLb"> ให้นักเรียนเห็นตารางผู้นำของห้องตัวเองหลังส่งงาน</label>
+      </div>
+      <div class="prs-lb" id="rsBoard"></div>
       <div class="rs-actions">
         <button class="btn" type="button" id="rsReload">↻ โหลดใหม่</button>
         <button class="btn" type="button" id="rsCsv">ส่งออก CSV</button>

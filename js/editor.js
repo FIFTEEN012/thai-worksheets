@@ -5233,12 +5233,13 @@ async function applyOnlineSubmitDefaults() {
     enabled: cur.enabled === undefined ? true : Boolean(cur.enabled),
     api: siteApiUrl() || cur.api || '',
     teacher: (me && me.submitCode) || cur.teacher || '',
-    classes: classList(cur.classes)
+    classes: classList(cur.classes),
+    leaderboard: Boolean(cur.leaderboard)
   };
   if (me && s.onlineSubmit.enabled) {
     fetch(apiBase() + '/worksheet', {
       method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'register', id: state.manifest.id, title: titleInput.value.trim() || state.manifest.title, classes: s.onlineSubmit.classes })
+      body: JSON.stringify({ action: 'register', id: state.manifest.id, title: titleInput.value.trim() || state.manifest.title, classes: s.onlineSubmit.classes, leaderboard: s.onlineSubmit.leaderboard })
     }).catch(() => {});
   }
 }
@@ -5261,6 +5262,7 @@ function openSettings(afterSave, initialTab = 'basic') {
   const onl = state.manifest.settings.onlineSubmit || {};
   $('#ajOnline').checked = onl.enabled === undefined ? Boolean(window.OPENWORKSHEETS_CONFIG?.gasUrl) : Boolean(onl.enabled);
   $('#ajClases').value = classList(onl.classes).join('\n');
+  $('#ajLeaderboard').checked = Boolean(onl.leaderboard);
   $('#ajOnlineNoGas').hidden = Boolean(siteApiUrl() || onl.api);
   showTeacherAccount();
   $('#ajCifrarEntregas').checked = state.manifest.settings.encryptSubmissions === true;
@@ -5335,7 +5337,8 @@ $('#dlgAjustes')?.addEventListener('close', () => {
   state.manifest.settings.onlineSubmit = {
     ...(state.manifest.settings.onlineSubmit || {}),
     enabled: $('#ajOnline').checked,
-    classes: classList($('#ajClases').value)
+    classes: classList($('#ajClases').value),
+    leaderboard: $('#ajLeaderboard').checked
   };
   applyOnlineSubmitDefaults();
   state.manifest.settings.keepFullscreen = $('#ajKeepFullscreen').checked;
@@ -6192,6 +6195,8 @@ function insertGraphic({ blob, ext, ratio }) {
   }, state.manifest.pages.length ? 0 : 400);
 }
 $('#btnAiGen')?.addEventListener('click', openAiGen);
+// หน้าแรก → editor.html?ai=1 เปิดหน้าต่าง AI ทันที
+if (new URLSearchParams(location.search).has('ai')) setTimeout(openAiGen, 300);
 $('#btnGraphics')?.addEventListener('click', () => openGraphicsDialog({ onPick: insertGraphic }));
 fileMenuItem('#miNuevo', () => openStartDialog());
 

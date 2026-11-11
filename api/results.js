@@ -28,7 +28,7 @@ export default async function handler(req, res) {
     }
 
     const list = await sql`
-      SELECT w.id, w.title, w.classes, w.pkg IS NOT NULL AS hosted, w.updated_at,
+      SELECT w.id, w.title, w.classes, w.pkg IS NOT NULL AS hosted, w.public_leaderboard, w.updated_at,
              COUNT(s.id)::int AS submissions, MAX(s.created_at) AS last_submission
       FROM worksheets w LEFT JOIN submissions s ON s.worksheet_id = w.id AND s.teacher_id = w.teacher_id
       WHERE w.teacher_id = ${teacher.id}
@@ -36,7 +36,7 @@ export default async function handler(req, res) {
     return send(res, 200, {
       ok: true,
       worksheets: list.map(w => ({
-        id: w.id, title: w.title, classes: w.classes, hosted: w.hosted, submissions: w.submissions,
+        id: w.id, title: w.title, classes: w.classes, hosted: w.hosted, publicLeaderboard: w.public_leaderboard, submissions: w.submissions,
         lastSubmission: w.last_submission ? new Date(w.last_submission).toISOString() : null
       }))
     });

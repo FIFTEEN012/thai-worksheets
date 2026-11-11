@@ -23,11 +23,16 @@ export default async function handler(req, res) {
     const teacher = await currentTeacher(req);
     if (!teacher) return send(res, 401, { ok: false, error: 'กรุณาเข้าสู่ระบบ' });
     const body = await readJson(req);
+    // เปิด/ปิดตารางผู้นำให้นักเรียนเห็น (จากห้องครู)
+    if (body && body.action === 'setLeaderboard' && body.id) {
+      const r = await sql`UPDATE worksheets SET public_leaderboard = ${Boolean(body.enabled)} WHERE id = ${String(body.id)} AND teacher_id = ${teacher.id} RETURNING id`;
+      return send(res, 200, { ok: r.length > 0 });
+    }
     if (!body || body.action !== 'register' || !body.id) return send(res, 400, { ok: false, error: 'ไม่รู้จักคำสั่ง' });
     const classes = (Array.isArray(body.classes) ? body.classes : []).map(c => String(c).trim().slice(0, 60)).filter(Boolean).slice(0, 100);
     const rows = await sql`
-      INSERT INTO worksheets (id, teacher_id, title, classes) VALUES (${String(body.id).slice(0, 80)}, ${teacher.id}, ${String(body.title || '').slice(0, 300)}, ${classes})
-      ON CONFLICT (id) DO UPDATE SET title = EXCLUDED.title, classes = EXCLUDED.classes, updated_at = now()
+      INSERT INTO worksheets (id, teacher_id, title, classes, public_leaderboard) VALUES (${String(body.id).slice(0, 80)}, ${teacher.id}, ${String(body.title || '').slice(0, 300)}, ${classes}, ${Boolean(body.leaderboard)})
+      ON CONFLICT (id) DO UPDATE SET title = EXCLUDED.title, classes = EXCLUDED.classes, public_leaderboard = EXCLUDED.public_leaderboard, updated_at = now()
       WHERE worksheets.teacher_id = EXCLUDED.teacher_id
       RETURNING id`;
     if (!rows.length) return send(res, 409, { ok: false, error: 'ใบงานนี้เป็นของครูคนอื่น' });

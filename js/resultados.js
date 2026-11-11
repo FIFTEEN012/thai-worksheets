@@ -110,6 +110,7 @@ async function loadRows() {
   const ws = worksheets.find(w => w.id === id);
   const link = $('#rsStudentLink');
   link.hidden = !(ws && ws.hosted);
+  $('#rsPublicLb').checked = Boolean(ws && ws.publicLeaderboard);
   if (ws && ws.hosted) link.href = `${SITE}/alumno.html?url=${encodeURIComponent(`${API}/worksheet?id=${id}&pkg=1`)}`;
   fillClasses(d.classes || []);
   render();
@@ -169,6 +170,23 @@ function render() {
         `<tr data-class="${esc(c)}"><td>${esc(c || '(ไม่ระบุห้อง)')}</td><td class="rs-num">${o.n}</td><td class="rs-num">${num(o.s / o.n)}</td><td class="rs-num">${o.p} (${Math.round(o.p / o.n * 100)}%)</td></tr>`).join('') + '</tbody></table>';
     sum.querySelectorAll('tr[data-class]').forEach(tr => tr.addEventListener('click', () => { $('#rsClase').value = tr.dataset.class; render(); }));
   } else sum.innerHTML = '';
+
+  // ตารางผู้นำ: คะแนนดีที่สุดของแต่ละคน แยกตามห้อง (10 อันดับ)
+  const board = $('#rsBoard');
+  const byClass = new Map();
+  allRows.filter(r => $('#rsClase').value === '__all' || (r.grupo || '') === $('#rsClase').value).forEach(r => {
+    const c = r.grupo || '(ไม่ระบุห้อง)';
+    const m = byClass.get(c) || new Map();
+    const k = r.alumno.trim().toLowerCase();
+    const prev = m.get(k);
+    if (!prev || r.pct > prev.pct || (r.pct === prev.pct && r.fecha < prev.fecha)) m.set(k, r);
+    byClass.set(c, m);
+  });
+  const medal = i => ['🥇', '🥈', '🥉'][i] || String(i + 1);
+  board.innerHTML = [...byClass.entries()].sort((a, b) => thCmp(a[0], b[0])).map(([c, m]) => {
+    const top = [...m.values()].sort((a, b) => b.pct - a.pct || (a.fecha > b.fecha ? 1 : -1)).slice(0, 10);
+    return `<div class="card"><h3>ห้อง ${esc(c)}</h3><ol>${top.map((r, i) => `<li><span style="text-align:center;font-weight:900">${medal(i)}</span><span>${esc(r.alumno)}</span><b style="color:var(--prs-blue-dark)">${r.pct}%</b></li>`).join('')}</ol></div>`;
+  }).join('') || '<p style="color:var(--prs-ink-soft)">ยังไม่มีข้อมูล</p>';
 
   const cols = [['alumno', 'ชื่อนักเรียน'], ['grupo', 'ห้อง'], ['nota', 'คะแนน'], ['nota10', '/10'], ['pct', '%'],
     ['pendientes', 'รอตรวจ'], ['vigilancia', 'ออกจากจอ'], ['fecha', 'เวลาส่ง'], ['_attempt', 'ครั้งที่']];
@@ -287,6 +305,13 @@ $('#rsLatest').addEventListener('change', render);
 $('#rsBuscar').addEventListener('input', render);
 $('#rsCsv').addEventListener('click', exportCsv);
 $('#rsReload').addEventListener('click', loadWorksheets);
+$('#rsPublicLb').addEventListener('change', async e => {
+  const id = $('#rsFicha').value;
+  const d = await api('/worksheet', { method: 'POST', body: { action: 'setLeaderboard', id, enabled: e.target.checked } });
+  if (!d.ok) { e.target.checked = !e.target.checked; alert(d.error || 'บันทึกไม่สำเร็จ'); return; }
+  const ws = worksheets.find(w => w.id === id);
+  if (ws) ws.publicLeaderboard = e.target.checked;
+});
 
 (async () => {
   const d = await api('/auth').catch(() => ({}));

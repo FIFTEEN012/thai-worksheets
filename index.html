@@ -3,16 +3,17 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>OpenWorksheets ภาษาไทย · ใบงานออนไลน์ตรวจอัตโนมัติ</title>
+  <title>PRS Worksheet · ใบงานออนไลน์ตรวจอัตโนมัติ</title>
   <meta name="description" content="สร้างใบงาน แบบฝึกหัด และกิจกรรมที่ตรวจคำตอบอัตโนมัติจาก PDF หรือรูปภาพ ไม่ต้องมีเซิร์ฟเวอร์ บันทึกเป็นไฟล์ อัปโหลดขึ้น Drive แล้วแชร์ลิงก์ให้นักเรียน">
-  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="icon" href="graphics/logo.svg" type="image/svg+xml">
   <link rel="stylesheet" href="css/app.css">
+  <link rel="stylesheet" href="css/prs.css">
   <script>(function(){var t=localStorage.getItem('wpf-tema');if(t)document.documentElement.setAttribute('data-theme',t);})();</script>
 </head>
 <body>
 
   <header class="topbar">
-    <a class="brand" href="index.html">OpenWorksheets <span class="tag" data-i18n="nav.tagline">fichas autocorregibles</span></a>
+    <a class="brand" href="index.html">PRS Worksheet <span class="tag" data-i18n="nav.tagline">fichas autocorregibles</span></a>
     <span class="spacer"></span>
     <select id="selLang" class="sel-lang" aria-label="ภาษา / Language">
       <option value="th">ไทย</option>
@@ -28,78 +29,52 @@
 
   <main class="page-wrap">
 
-    <section class="hero">
-      <h1><span data-i18n="index.heroPre">Tu PDF, convertido en una</span><br><span class="subrayado" data-i18n="index.heroHighlight">ficha autocorregible</span></h1>
-      <p class="lead" data-i18n="index.heroLead">
-        Sube un PDF o una imagen, coloca encima campos interactivos y compártelo con tu
-        alumnado mediante un simple enlace. Sin servidor, sin cuentas, sin instalaciones.
-      </p>
-    </section>
-
-    <section class="home-grid">
-      <div class="card home-card anim-in">
-        <div class="home-card-top">
-          <span class="num">1</span>
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="home-icon" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+    <section class="prs-hero">
+      <div>
+        <span class="prs-pill">✨ ใหม่! ให้ AI ออกแบบใบงานพร้อมภาพประกอบ</span>
+        <h1>สร้างใบงาน<span class="hl">สนุก ๆ</span><br>ที่เด็กอยากทำ</h1>
+        <p class="lead">พิมพ์บอก AI ว่าอยากได้ใบงานแบบไหน หรือแปลง PDF ที่มีอยู่ให้เป็นใบงานออนไลน์ตรวจอัตโนมัติ แชร์ลิงก์ให้นักเรียน แล้วดูคะแนนแยกตามห้องได้ทันที</p>
+        <div class="ctas">
+          <a class="btn primary" href="editor.html?ai=1">✨ สร้างใบงานด้วย AI</a>
+          <a class="btn" href="editor.html">เปิดตัวแก้ไข</a>
+          <a class="btn prs-yellow" href="resultados.html">🏆 ห้องครู</a>
         </div>
-        <h2 data-i18n="index.card1.title">Crea</h2>
-        <p data-i18n="index.card1.desc">Sube tu PDF y dibuja encima respuestas cortas,
-        opciones, huecos, emparejamientos, ordenaciones o zonas de arrastre. Configura
-        respuestas correctas y puntuación.</p>
-        <a id="linkEjemplo" class="home-example" href="editor.html?ejemplo=ejemplos/ficha-de-prueba-para-openworksheets.owpkg" data-i18n="index.heroExample">Ver un ejemplo</a>
-        <a class="btn" href="editor.html" data-i18n="index.card1.btn">Abrir el editor</a>
+        <p style="margin:14px 0 0"><a id="linkEjemplo" href="editor.html?ejemplo=ejemplos/thai-solar-system.owpkg">ดูใบงานตัวอย่าง →</a></p>
       </div>
-      <div class="card home-card anim-in">
-        <div class="home-card-top">
-          <span class="num">2</span>
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="home-icon" aria-hidden="true"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" x2="15.42" y1="13.51" y2="17.49"/><line x1="15.41" x2="8.59" y1="6.51" y2="10.49"/></svg>
-        </div>
-        <h2 data-i18n="index.card2.title">Comparte</h2>
-        <p data-i18n="index.card2.desc">Guarda la ficha desde Archivo -> Guardar ficha (.owpkg), súbela a un alojamiento público y genera el enlace para tu alumnado. La abren en el navegador, responden y reciben su corrección al instante.</p>
-        <button class="btn" id="btnAbrirCompartir" data-i18n="index.card2.btn">Generar enlace</button>
-      </div>
-      <div class="card home-card anim-in">
-        <div class="home-card-top">
-          <span class="num">3</span>
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="home-icon" aria-hidden="true"><rect width="8" height="4" x="8" y="2" rx="1" ry="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="m9 14 2 2 4-4"/></svg>
-        </div>
-        <h2 data-i18n="index.card3.title">Revisa las entregas</h2>
-        <p data-i18n="index.card3.desc">Al terminar, el alumnado puede enviarte su entrega como archivo o enlace. Ábrela para ver la puntuación, las respuestas a cada pregunta y comprobar si se ha editado a mano.</p>
-        <a class="btn" href="entregas.html" data-i18n="index.card3.btn">Abrir entregas</a>
-        <a class="btn primary" href="resultados.html" data-i18n="nav.results">ห้องครู (ดูคะแนน)</a>
+      <div class="art" aria-hidden="true">
+        <div class="blob"></div>
+        <img class="float" src="graphics/star.svg" alt="" style="left:8%;top:8%">
+        <img class="float" src="graphics/rocket.svg" alt="" style="right:6%;top:14%;animation-delay:.6s">
+        <img class="float" src="graphics/book.svg" alt="" style="left:12%;bottom:6%;animation-delay:1.2s">
+        <img class="m" src="graphics/mascot-happy.svg" alt="น้องฟ้า มาสคอตของ PRS Worksheet">
       </div>
     </section>
 
-    <!-- Banner del servidor MCP: la instalación se explica en el editor -->
-    <section class="home-feature-banner anim-in">
-      <div class="banner-icon">
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="math-icon" aria-hidden="true">
-          <path d="M12 9H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2v-7"/>
-          <path d="M11 9v3a2 2 0 0 0 2 2h3"/>
-          <path d="M6 18h6"/>
-          <path d="M18.5 0 20.2 3.3 23.5 5 20.2 6.7 18.5 10 16.8 6.7 13.5 5 16.8 3.3z" fill="currentColor" stroke="none"/>
-        </svg>
-      </div>
-      <div class="banner-content">
-        <h2 data-i18n="index.mcp.title">Que la ficha te la haga tu IA</h2>
-        <p data-i18n="index.mcp.desc">Con el servidor MCP, la inteligencia artificial que ya uses abre tu PDF o tu imagen, coloca encima los campos, comprueba en una vista previa que han caído donde debían y te guarda la ficha. También puede escribirla entera sobre un tema, sin ningún documento de partida. Es un programa que se instala una sola vez, y lo instala ella.</p>
-        <a class="btn banner-btn" href="editor.html?mcp=1" data-i18n="index.mcp.btn">Cómo se instala</a>
-      </div>
+    <h2 class="prs-section-title">ทุกอย่างที่ครูต้องการ ในที่เดียว</h2>
+    <p class="prs-section-sub">ออกแบบให้ครูใช้ง่าย และให้นักเรียนสนุกกับการทำใบงาน</p>
+    <section class="prs-features">
+      <div class="card prs-feature"><div class="ic" style="background:#EDE7FF">🤖</div><h3>AI สร้างใบงานให้</h3><p>พิมพ์หัวข้อและระดับชั้น ได้ใบงานครบทั้งคำถาม เฉลย และการจัดหน้าในไม่กี่นาที</p></div>
+      <div class="card prs-feature"><div class="ic" style="background:#E8F5FE">🎨</div><h3>ธีมสวย 7 แบบ</h3><p>สดใส ท้องทะเล อวกาศ ไทยประเพณี ฯลฯ พร้อมภาพประกอบที่ AI วาดและคลังสติกเกอร์</p></div>
+      <div class="card prs-feature"><div class="ic" style="background:#E3FAF2">✅</div><h3>ตรวจให้อัตโนมัติ</h3><p>13 รูปแบบคำถาม ตรวจทันทีเมื่อนักเรียนกดส่ง คะแนนเข้าห้องครูแยกตามห้องเรียน</p></div>
+      <div class="card prs-feature"><div class="ic" style="background:#FFF6DC">⭐</div><h3>เกมสะสมดาวและ XP</h3><p>นักเรียนได้ดาว แต้ม XP เหรียญรางวัล และสถิติทำต่อเนื่อง ยิ่งทำยิ่งสนุก</p></div>
+      <div class="card prs-feature"><div class="ic" style="background:#FFEFE3">🏆</div><h3>ตารางผู้นำรายห้อง</h3><p>ดู 10 อันดับคะแนนสูงสุดของแต่ละห้อง และเลือกได้ว่าจะให้นักเรียนเห็นหรือไม่</p></div>
+      <div class="card prs-feature"><div class="ic" style="background:#FFE9EA">📄</div><h3>แปลง PDF เดิมได้</h3><p>อัปโหลด PDF หรือรูปภาพ แล้ววางช่องคำตอบทับลงไป ไม่ต้องพิมพ์ใบงานใหม่</p></div>
     </section>
 
-    <!-- Banner de Fórmulas Matemáticas y LaTeX -->
-    <section class="home-feature-banner anim-in">
-      <div class="banner-icon">
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="math-icon">
-          <path d="M4 9h1l2.5 10L11 4h9" />
-          <path d="M14 10l4 4" />
-          <path d="M18 10l-4 4" />
-        </svg>
+    <h2 class="prs-section-title">ใช้งานง่าย 3 ขั้นตอน</h2>
+    <section class="prs-steps">
+      <div class="card prs-step"><h3>สร้างใบงาน</h3><p>ให้ AI สร้าง หรือออกแบบเองในตัวแก้ไข แล้วกดบันทึก</p></div>
+      <div class="card prs-step"><h3>แชร์ลิงก์</h3><p>ส่งลิงก์หรือคิวอาร์โค้ดให้นักเรียนทาง LINE หรือ Classroom</p><p style="margin-top:10px"><button class="btn small" id="btnAbrirCompartir">สร้างลิงก์จาก Google Drive</button></p></div>
+      <div class="card prs-step"><h3>ดูคะแนน</h3><p>คะแนนเข้าห้องครูอัตโนมัติ ดูรายห้อง รายข้อ และตารางผู้นำ</p></div>
+    </section>
+
+    <section class="prs-band">
+      <img src="graphics/mascot-cheer.svg" alt="">
+      <div>
+        <h2>ใช้ร่วมกับ Claude ผ่าน MCP</h2>
+        <p>เพิ่มเป็น connector ใน Claude.ai แล้วสั่งสร้างใบงานหรือถามคะแนนในแชตได้เลย หรือติดตั้งในเครื่องเพื่อแปลง PDF</p>
       </div>
-      <div class="banner-content">
-        <h2 data-i18n="index.latex.title">Soporte completo para fórmulas matemáticas y ciencias</h2>
-        <p data-i18n-html="index.latex.desc">Escribe fórmulas matemáticas con sintaxis <strong>LaTeX</strong> (como \( x = \frac{-b \pm \sqrt{b^2 - 4ac}}{2a} \)) y ecuaciones químicas (como \( \ce{2H2 + O2 -> 2H2O} \)) en textos fijos, opciones de respuesta, tablas, encabezados y más. Se renderizan automáticamente y funcionan sin conexión.</p>
-      </div>
+      <a class="btn" href="resultados.html">ดูวิธีเชื่อมต่อ</a>
     </section>
 
     <details class="seguridad">

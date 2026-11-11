@@ -3,16 +3,17 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ตัวแก้ไข · OpenWorksheets</title>
-  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <title>ตัวแก้ไข · PRS Worksheet</title>
+  <link rel="icon" href="graphics/logo.svg" type="image/svg+xml">
   <link rel="stylesheet" href="css/app.css">
+  <link rel="stylesheet" href="css/prs.css">
   <link rel="stylesheet" href="css/aiui.css">
   <script>(function(){var t=localStorage.getItem('wpf-tema');if(t)document.documentElement.setAttribute('data-theme',t);})();</script>
 </head>
 <body>
 
   <header class="topbar">
-    <a class="brand" href="index.html" title="กลับหน้าหลัก">OpenWorksheets</a>
+    <a class="brand" href="index.html" title="กลับหน้าหลัก">PRS Worksheet</a>
     <input type="text" class="title-input" id="titulo" data-i18n-placeholder="nav.titlePlaceholder" placeholder="ชื่อใบงาน…" maxlength="120">
     <span class="spacer"></span>
     <div class="topbar-menu" id="menuArchivo">
@@ -167,6 +168,7 @@
             <label class="f-label" for="ajClases" data-i18n="dlg.online.classes">รายชื่อห้องเรียน</label>
             <textarea id="ajClases" rows="4" style="width:100%" data-i18n-placeholder="dlg.online.classesPh"></textarea>
             <p><small data-i18n="dlg.online.classesHint"></small></p>
+            <label class="check-row"><input type="checkbox" id="ajLeaderboard"> <span>🏆 แสดงตารางผู้นำ 10 อันดับของห้องให้นักเรียนเห็นหลังส่ง (แสดงชื่อย่อ)</span></label>
           </div>
         </section>
         <section class="settings-panel" id="ajPanelAccess" role="tabpanel" data-panel="access" hidden>
