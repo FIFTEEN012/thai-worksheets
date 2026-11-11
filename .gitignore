@@ -6,3 +6,6 @@ INFORME_REVISION.md
 
 # การตั้งค่าเฉพาะเครื่อง
 .claude/
+
+.vercel
+.env*

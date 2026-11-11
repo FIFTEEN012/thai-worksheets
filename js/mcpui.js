@@ -15,7 +15,7 @@
 import { el, copyToClipboard, toast } from './util.js';
 import { t } from './i18n.js';
 
-const REPO = 'https://github.com/openworksheets/openworksheets.github.io';
+const REPO = 'https://github.com/FIFTEEN012/thai-worksheets';
 
 // El encargo es deliberadamente corto: el detalle (requisitos, cómo se registra,
 // qué herramientas hay y en qué orden se usan) vive en el README de la carpeta,

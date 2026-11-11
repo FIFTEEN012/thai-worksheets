@@ -41,7 +41,7 @@ import { iconBtn, colorInput } from './editor-ui.js';
 import { state, urls, fileUrl, markDirty, onDirty } from './editor-state.js';
 import { takeFile } from './filehandoff.js';
 import { layoutFields } from './aiimport.js';
-import { classList } from './onlinesubmit.js';
+import { classList, siteApiUrl } from './onlinesubmit.js';
 import { openAiDialog } from './aiui.js';
 import { openMcpDialog } from './mcpui.js';
 
@@ -5202,6 +5202,46 @@ document.querySelectorAll('#dlgAjustes .settings-tab').forEach(tab => {
     f.id === 'mono' ? t('editor.fontMono') : f.name)));
 })();
 
+// ---------- ฉบับภาษาไทย: บัญชีครูและการส่งคะแนนออนไลน์ ----------
+let teacherAccount; // undefined = ยังไม่ได้ถาม, null = ไม่ได้เข้าสู่ระบบ
+const apiBase = () => (window.OPENWORKSHEETS_CONFIG?.apiBase || '').replace(/\/+$/, '');
+async function fetchTeacher() {
+  if (teacherAccount !== undefined) return teacherAccount;
+  if (!apiBase()) return (teacherAccount = null);
+  try {
+    const d = await fetch(apiBase() + '/auth', { credentials: 'include' }).then(r => r.json());
+    teacherAccount = d.teacher || null;
+  } catch { teacherAccount = null; }
+  return teacherAccount;
+}
+async function showTeacherAccount() {
+  const box = $('#ajOnlineAccount');
+  if (!box) return;
+  box.textContent = t('dlg.online.checking');
+  const me = await fetchTeacher();
+  box.innerHTML = '';
+  if (me) box.append(t('dlg.online.account', { name: me.name, email: me.email }));
+  else box.append(t('dlg.online.noAccount') + ' ', el('a', { href: 'resultados.html', target: '_blank', rel: 'noopener' }, t('dlg.online.login')));
+}
+// ตั้งค่าส่งคะแนนให้ครบ (ปลายทาง API + รหัสครูที่เข้าสู่ระบบอยู่) และจดใบงานไว้ในบัญชีครู
+async function applyOnlineSubmitDefaults() {
+  const s = state.manifest.settings;
+  const cur = s.onlineSubmit || {};
+  const me = await fetchTeacher();
+  s.onlineSubmit = {
+    enabled: cur.enabled === undefined ? true : Boolean(cur.enabled),
+    api: siteApiUrl() || cur.api || '',
+    teacher: (me && me.submitCode) || cur.teacher || '',
+    classes: classList(cur.classes)
+  };
+  if (me && s.onlineSubmit.enabled) {
+    fetch(apiBase() + '/worksheet', {
+      method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'register', id: state.manifest.id, title: titleInput.value.trim() || state.manifest.title, classes: s.onlineSubmit.classes })
+    }).catch(() => {});
+  }
+}
+
 function openSettings(afterSave, initialTab = 'basic') {
   const dlg = $('#dlgAjustes');
   dlg._afterSave = afterSave || null;
@@ -5220,7 +5260,8 @@ function openSettings(afterSave, initialTab = 'basic') {
   const onl = state.manifest.settings.onlineSubmit || {};
   $('#ajOnline').checked = onl.enabled === undefined ? Boolean(window.OPENWORKSHEETS_CONFIG?.gasUrl) : Boolean(onl.enabled);
   $('#ajClases').value = classList(onl.classes).join('\n');
-  $('#ajOnlineNoGas').hidden = Boolean(window.OPENWORKSHEETS_CONFIG?.gasUrl || onl.url);
+  $('#ajOnlineNoGas').hidden = Boolean(siteApiUrl() || onl.api);
+  showTeacherAccount();
   $('#ajCifrarEntregas').checked = state.manifest.settings.encryptSubmissions === true;
   $('#ajSecurityMeter').checked = state.manifest.settings.securityMeter !== false;
   $('#ajCryptoPassword').value = state.submissionCryptoPassword;
@@ -5290,15 +5331,12 @@ $('#dlgAjustes')?.addEventListener('close', () => {
   state.manifest.settings.shuffle = $('#ajBarajar').checked;
   state.manifest.settings.showFormulaButton = $('#ajFormulaBtn').checked;
   state.manifest.settings.maxAttempts = Math.max(0, parseInt($('#ajIntentos').value, 10) || 0);
-  {
-    const prevUrl = state.manifest.settings.onlineSubmit?.url || '';
-    state.manifest.settings.onlineSubmit = {
-      enabled: $('#ajOnline').checked,
-      // เก็บ URL ไว้ในใบงาน เพื่อให้ส่งคะแนนได้แม้เปิดใบงานจากเว็บอื่น
-      url: window.OPENWORKSHEETS_CONFIG?.gasUrl || prevUrl,
-      classes: classList($('#ajClases').value)
-    };
-  }
+  state.manifest.settings.onlineSubmit = {
+    ...(state.manifest.settings.onlineSubmit || {}),
+    enabled: $('#ajOnline').checked,
+    classes: classList($('#ajClases').value)
+  };
+  applyOnlineSubmitDefaults();
   state.manifest.settings.keepFullscreen = $('#ajKeepFullscreen').checked;
   // La vigilancia (qué hacer al salir + entrega automática) solo aplica con el
   // control de pantalla completa activado; si está desmarcado, se desactiva.
@@ -5514,6 +5552,7 @@ async function prepareExportManifest(retry) {
     if (!window.confirm(msg + t('validate.anyway'))) return null;
   }
   state.manifest.lang = getLang();
+  await applyOnlineSubmitDefaults();
   let exportManifest = JSON.parse(JSON.stringify(state.manifest));
   if (exportManifest.settings?.encryptSubmissions === true) {
     if (!state.submissionCryptoPassword) {

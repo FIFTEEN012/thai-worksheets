@@ -1,17 +1,25 @@
-// ฉบับภาษาไทย: ส่งคะแนนของนักเรียนให้ครูทางออนไลน์ (Google Apps Script → Google Sheets)
+// ฉบับภาษาไทย: ส่งคะแนนของนักเรียนให้ครูทางออนไลน์ (API บน Vercel → ฐานข้อมูล Neon)
 //
-// ใบงานเปิดใช้ได้ที่ ตั้งค่า → การตรวจ → «ส่งคะแนนให้ครูอัตโนมัติ»
-// manifest.settings.onlineSubmit = { enabled: true, url: '<…/exec>', classes: ['ม.1/1', …] }
-// ถ้าใบงานไม่ได้เก็บ url ไว้ จะใช้ gasUrl ใน config.js ของเว็บที่เปิดใบงาน
+// manifest.settings.onlineSubmit = {
+//   enabled: true,                       // ปิดได้ที่ ตั้งค่า → การตรวจ
+//   api: 'https://<เว็บ>/api/submit',    // ปลายทาง (บันทึกไว้ตอนครูบันทึกใบงาน)
+//   teacher: '<รหัสส่งคะแนนของครู>',     // คะแนนเข้าบัญชีครูคนนี้ (ไม่มี = บัญชีผู้ดูแลระบบ)
+//   classes: ['ม.1/1', …]                // รายชื่อห้องให้นักเรียนเลือก
+// }
+
+// ปลายทาง API ของเว็บที่เปิดอยู่ (config.js: apiBase) เป็น URL เต็ม
+export function siteApiUrl() {
+  const base = window.OPENWORKSHEETS_CONFIG?.apiBase;
+  if (!base) return '';
+  try { return new URL(base.replace(/\/+$/, '') + '/submit', window.location.href).href; } catch { return ''; }
+}
 
 export function onlineSubmitConfig(manifest) {
   const cfg = manifest?.settings?.onlineSubmit || {};
-  const siteGas = window.OPENWORKSHEETS_CONFIG?.gasUrl || '';
-  const url = cfg.url || siteGas;
-  // ค่าเริ่มต้น: ถ้าใบงานไม่ได้กำหนดไว้ (เช่น ใบงานเก่า) และเว็บตั้งค่า Apps Script แล้ว ให้ส่งคะแนนเลย
-  // ครูปิดได้ที่ ตั้งค่า → การตรวจ (จะบันทึก enabled: false ไว้ในใบงาน)
-  const enabled = cfg.enabled === undefined ? Boolean(siteGas) : Boolean(cfg.enabled);
-  return { enabled: enabled && Boolean(url), url, classes: classList(cfg.classes) };
+  // ใบงานรุ่นทดลองเคยเก็บ URL ของ Google Apps Script ไว้ใน cfg.url: ไม่ใช้แล้ว
+  const url = cfg.api || siteApiUrl();
+  const enabled = cfg.enabled === undefined ? true : Boolean(cfg.enabled);
+  return { enabled: enabled && Boolean(url), url, teacher: cfg.teacher || '', classes: classList(cfg.classes) };
 }
 
 export function classList(raw) {
@@ -31,21 +39,21 @@ function slimEntrega(entrega) {
 }
 
 // คืนค่า { ok, error? } — ลองใหม่สูงสุด 3 ครั้งเมื่อเครือข่ายขัดข้อง
-export async function sendScoreOnline(url, entrega) {
-  const body = JSON.stringify({ action: 'submit', data: slimEntrega(entrega) });
+export async function sendScoreOnline(online, entrega) {
+  const body = JSON.stringify({ action: 'submit', teacher: online.teacher, data: slimEntrega(entrega) });
   let lastError = '';
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      // text/plain = simple request จึงไม่ต้องมี CORS preflight (Apps Script ไม่รองรับ)
-      const resp = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body, redirect: 'follow' });
-      const data = await resp.json();
+      // text/plain = simple request จึงไม่ต้องมี CORS preflight เมื่อเปิดใบงานจากเว็บอื่น
+      const resp = await fetch(online.url, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body });
+      const data = await resp.json().catch(() => null);
       if (data && data.ok) return { ok: true };
       lastError = (data && data.error) || ('HTTP ' + resp.status);
-      break; // เซิร์ฟเวอร์ปฏิเสธ: ลองใหม่ก็ไม่ช่วย
+      if (resp.status >= 400 && resp.status < 500) break; // เซิร์ฟเวอร์ปฏิเสธ: ลองใหม่ก็ไม่ช่วย
     } catch (e) {
       lastError = e.message || String(e);
-      await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
     }
+    await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
   }
   return { ok: false, error: lastError };
 }

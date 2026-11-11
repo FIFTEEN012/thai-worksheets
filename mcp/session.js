@@ -18,6 +18,14 @@ const MIN_H = 0.012;
 
 let state = null;
 
+// ฉบับภาษาไทย: ส่งคะแนนเข้าบัญชีครูบนเว็บ (ตั้งค่าตอนลงทะเบียน MCP)
+//   OWS_TEACHER_CODE = รหัสส่งคะแนนของครู (ดูได้ที่หน้า «ห้องครู» ของเว็บ)
+//   OWS_SITE         = ที่อยู่เว็บ (ค่าเริ่มต้น https://thai-worksheets.vercel.app)
+function onlineSubmitFromEnv() {
+  const site = String(process.env.OWS_SITE || 'https://thai-worksheets.vercel.app').replace(/\/+$/, '');
+  return { enabled: true, api: site + '/api/submit', teacher: String(process.env.OWS_TEACHER_CODE || ''), classes: [] };
+}
+
 function reset() {
   state = null;
 }
@@ -30,7 +38,7 @@ function newManifest(title) {
     title: title || '',
     author: '',
     instructions: '',
-    lang: '',
+    lang: 'th',
     settings: {
       showScore: true,
       showCorrection: true,
@@ -40,7 +48,8 @@ function newManifest(title) {
       focusMode: 'free',
       focusMaxIncidents: 0,
       encryptSubmissions: false,
-      fontFamily: 'atkinson',
+      fontFamily: 'sarabun',
+      onlineSubmit: onlineSubmitFromEnv(),
       scorm: { statusMode: 'score', masteryScore: 50 }
     },
     access: { desde: '', hasta: '', autoEntrega: false, tiempoLimite: 0, password: '' },
@@ -126,13 +135,13 @@ const PAGE_SIZES = {
 // pantalla como impresa. apply_design admite personalizar la paleta, pero parte
 // de estos valores seguros y corrige un color de texto que resulte ilegible.
 const DESIGN_THEMES = {
-  clean:      { accent: '#315b7d', paper: '#fbfdff', text: '#19324a', card: '#e7f0f7', fontFamily: 'atkinson' },
+  clean:      { accent: '#315b7d', paper: '#fbfdff', text: '#19324a', card: '#e7f0f7', fontFamily: 'sarabun' },
   science:    { accent: '#1f6f5f', paper: '#f7fbf9', text: '#173f38', card: '#dcefe9', fontFamily: 'andika' },
   math:       { accent: '#315aa8', paper: '#f7f9fd', text: '#1f365f', card: '#e2eaf8', fontFamily: 'lexend' },
   warm:       { accent: '#9a4f32', paper: '#fffaf5', text: '#533326', card: '#f4e5d7', fontFamily: 'nunito' },
   accessible: { accent: '#153e75', paper: '#ffffff', text: '#111827', card: '#e7f0fa', fontFamily: 'opendyslexic' }
 };
-const FONT_IDS = new Set(['atkinson', 'lexend', 'opendyslexic', 'andika', 'patrick', 'nunito', 'lora', 'mono']);
+const FONT_IDS = new Set(['sarabun', 'notothai', 'atkinson', 'lexend', 'opendyslexic', 'andika', 'patrick', 'nunito', 'lora', 'mono']);
 
 function hexColor(value, fallback, warnings, name) {
   if (value == null || value === '') return fallback;
@@ -964,6 +973,11 @@ function save(file) {
   const st = require_();
   let abs = path.resolve(String(file).replace(/^~/, process.env.HOME || '~'));
   if (!/\.owpkg$/i.test(abs)) abs += '.owpkg';
+  st.manifest.settings = st.manifest.settings || {};
+  const env = onlineSubmitFromEnv();
+  const cur = st.manifest.settings.onlineSubmit || {};
+  st.manifest.settings.onlineSubmit = { ...env, ...cur, teacher: cur.teacher || env.teacher, api: cur.api || env.api };
+  if (!st.manifest.lang) st.manifest.lang = 'th';
   const entries = [{ name: 'manifest.json', data: Buffer.from(JSON.stringify(st.manifest, null, 2), 'utf8') }];
   for (const [name, data] of st.files) entries.push({ name, data });
   fs.writeFileSync(abs, makeZip(entries));

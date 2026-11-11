@@ -14,8 +14,21 @@ window.OPENWORKSHEETS_CONFIG = {
   corsProxies: [
     { url: 'https://corsproxy.io/?', encode: true },
     { url: 'https://cors.eu.org/', encode: false }
-  ]
+  ],
+  // ฉบับภาษาไทย: API ส่งคะแนน/บัญชีครู (Vercel + Neon) อยู่บนเว็บหลัก
+  siteUrl: 'https://thai-worksheets.vercel.app',
+  // ใช้ path สัมพัทธ์: เรียก API ของเว็บที่เปิดอยู่ (ใบงานเก็บ URL เต็มไว้ตอนบันทึก)
+  apiBase: '/api'
 };
+
+// ฉบับภาษาไทย: เว็บเก่าบน GitHub Pages ย้ายไป Vercel แล้ว: พาไปหน้าเดียวกันบนเว็บใหม่
+// (ลิงก์นักเรียนเดิมยังใช้ได้ เพราะ path, ?query และ #hash ตามไปด้วย)
+(function () {
+  if (location.hostname !== 'fifteen012.github.io') return;
+  const site = window.OPENWORKSHEETS_CONFIG.siteUrl;
+  const path = location.pathname.replace(/^\/thai-worksheets/, '') || '/';
+  location.replace(site + path + location.search + location.hash);
+})();
 
 // *** PROTECCIÓN DEL DESPLIEGUE DEL AUTOR ***
 //

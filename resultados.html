@@ -3,17 +3,20 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ดูคะแนน · OpenWorksheets ภาษาไทย</title>
-  <meta name="description" content="ดูคะแนนที่นักเรียนส่งออนไลน์ แยกตามใบงานและห้องเรียน">
+  <title>ห้องครู · OpenWorksheets ภาษาไทย</title>
+  <meta name="description" content="บัญชีครู: ดูคะแนนที่นักเรียนส่งออนไลน์ แยกตามใบงานและห้องเรียน และเชื่อมต่อ AI ผ่าน MCP">
   <meta name="robots" content="noindex">
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="css/app.css">
   <script>(function(){var t=localStorage.getItem('wpf-tema');if(t)document.documentElement.setAttribute('data-theme',t);})();</script>
   <style>
-    .rs-login { display: flex; gap: 8px; flex-wrap: wrap; align-items: end; }
-    .rs-login input { min-width: 220px; }
+    .rs-auth { display: grid; gap: 10px; max-width: 420px; }
+    .rs-auth input { width: 100%; }
+    .rs-tabs { display: flex; gap: 6px; margin: 8px 0 12px; }
+    .rs-tabs button.is-active { background: var(--tinta); color: var(--papel, #fff); }
+    .rs-who { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
     .rs-filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; margin: 14px 0 6px; align-items: end; }
-    .rs-filters select { width: 100%; }
+    .rs-filters select, .rs-filters input { width: 100%; }
     .rs-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; margin: 14px 0; }
     .rs-stat { border: 1px solid var(--tinta-tenue); border-radius: 10px; padding: 10px 12px; }
     .rs-stat b { display: block; font-size: 1.5rem; font-variant-numeric: tabular-nums; }
@@ -22,67 +25,90 @@
     .rs-num { text-align: right; font-variant-numeric: tabular-nums; }
     .rs-detail td { background: color-mix(in srgb, var(--azul-claro) 10%, transparent); cursor: default; }
     .rs-detail table { width: 100%; border-collapse: collapse; }
-    .rs-detail th, .rs-detail td td { padding: 3px 6px; }
     .rs-ok { color: var(--verde); } .rs-bad { color: var(--rojo); } .rs-pend { color: #b45309; }
     .rs-msg { margin-top: 10px; }
     .rs-classsum { margin: 6px 0 14px; }
+    .rs-code { font-family: ui-monospace, Consolas, monospace; background: color-mix(in srgb, var(--azul-claro) 18%, transparent); padding: 8px 10px; border-radius: 8px; word-break: break-all; display: block; margin: 6px 0; }
+    .rs-section { margin-top: 22px; }
+    .rs-del { padding: 2px 8px; }
   </style>
 </head>
 <body>
 
   <header class="topbar">
-    <a class="brand" href="index.html" title="กลับหน้าหลัก">OpenWorksheets <span class="tag">ดูคะแนน</span></a>
+    <a class="brand" href="index.html" title="กลับหน้าหลัก">OpenWorksheets <span class="tag">ห้องครู</span></a>
     <span class="spacer"></span>
     <button class="btn small ghost" id="btnTema" title="ธีม: อัตโนมัติ (ตามระบบ)"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="btn-icon"><rect width="20" height="14" x="2" y="3" rx="2"/><path d="M8 21h8M12 17v4"/></svg></button>
-    <a class="btn small" href="index.html"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="btn-icon"><path d="m12 19-7-7 7-7M19 12H5"/></svg> กลับหน้าหลัก</a>
+    <a class="btn small" href="editor.html">สร้างใบงาน</a>
+    <a class="btn small" href="index.html"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="btn-icon"><path d="m12 19-7-7 7-7M19 12H5"/></svg> หน้าหลัก</a>
   </header>
 
   <main class="page-wrap">
-    <section class="card steps-box anim-in">
-      <h1 class="page-title">ดูคะแนนนักเรียน</h1>
-      <p>คะแนนที่นักเรียนส่งออนไลน์จากใบงานที่เปิด «ส่งคะแนนให้ครูอัตโนมัติ» ไว้ เลือกใบงานและห้องเรียนเพื่อดูผล</p>
-
-      <form class="rs-login" id="rsLogin">
-        <div>
-          <label class="f-label" for="rsKey">รหัสครู</label>
-          <input type="password" id="rsKey" autocomplete="current-password" required>
-        </div>
-        <label class="check-row" style="margin:0 0 8px"><input type="checkbox" id="rsRemember" checked> จำรหัสในเครื่องนี้</label>
-        <button class="btn primary" type="submit" id="rsGo">ดูคะแนน</button>
+    <!-- เข้าสู่ระบบ / สมัคร -->
+    <section class="card steps-box anim-in" id="rsAuthCard" hidden>
+      <h1 class="page-title">ห้องครู</h1>
+      <p>เข้าสู่ระบบเพื่อดูคะแนนที่นักเรียนส่งออนไลน์ แยกตามใบงานและห้องเรียน</p>
+      <div class="rs-tabs">
+        <button class="btn small is-active" type="button" data-auth="login">เข้าสู่ระบบ</button>
+        <button class="btn small" type="button" data-auth="register">สมัครบัญชีครู</button>
+      </div>
+      <form class="rs-auth" id="rsLoginForm">
+        <div><label class="f-label" for="lgEmail">อีเมล</label><input type="email" id="lgEmail" autocomplete="username" required></div>
+        <div><label class="f-label" for="lgPass">รหัสผ่าน</label><input type="password" id="lgPass" autocomplete="current-password" required></div>
+        <button class="btn primary" type="submit">เข้าสู่ระบบ</button>
       </form>
+      <form class="rs-auth" id="rsRegisterForm" hidden>
+        <div><label class="f-label" for="rgName">ชื่อครู (แสดงบนใบงาน)</label><input type="text" id="rgName" autocomplete="name" required></div>
+        <div><label class="f-label" for="rgEmail">อีเมล</label><input type="email" id="rgEmail" autocomplete="username" required></div>
+        <div><label class="f-label" for="rgPass">รหัสผ่าน (อย่างน้อย 8 ตัวอักษร)</label><input type="password" id="rgPass" autocomplete="new-password" minlength="8" required></div>
+        <div><label class="f-label" for="rgCode">รหัสสมัครสมาชิก (ขอจากผู้ดูแลระบบของโรงเรียน)</label><input type="text" id="rgCode" autocomplete="off" required></div>
+        <button class="btn primary" type="submit">สมัครและเข้าสู่ระบบ</button>
+      </form>
+      <p class="rs-msg" id="rsAuthMsg" hidden></p>
+    </section>
+
+    <!-- หลังเข้าสู่ระบบ -->
+    <section class="card steps-box anim-in" id="rsApp" hidden>
+      <div class="rs-who">
+        <h1 class="page-title" style="margin:0">คะแนนนักเรียน</h1>
+        <span class="spacer" style="flex:1"></span>
+        <span id="rsWho"></span>
+        <button class="btn small ghost" type="button" id="rsLogout">ออกจากระบบ</button>
+      </div>
+
+      <div class="rs-filters">
+        <div><label class="f-label" for="rsFicha">ใบงาน</label><select id="rsFicha"></select></div>
+        <div><label class="f-label" for="rsClase">ห้องเรียน</label><select id="rsClase"></select></div>
+        <div><label class="f-label" for="rsBuscar">ค้นหาชื่อ</label><input type="search" id="rsBuscar" placeholder="พิมพ์ชื่อนักเรียน…"></div>
+        <label class="check-row" style="margin:0 0 8px"><input type="checkbox" id="rsLatest" checked> เฉพาะครั้งล่าสุดของแต่ละคน</label>
+      </div>
       <p class="rs-msg" id="rsMsg" hidden></p>
 
-      <div id="rsApp" hidden>
-        <div class="rs-filters">
-          <div>
-            <label class="f-label" for="rsFicha">ใบงาน</label>
-            <select id="rsFicha"></select>
-          </div>
-          <div>
-            <label class="f-label" for="rsClase">ห้องเรียน</label>
-            <select id="rsClase"></select>
-          </div>
-          <div>
-            <label class="f-label" for="rsBuscar">ค้นหาชื่อ</label>
-            <input type="search" id="rsBuscar" placeholder="พิมพ์ชื่อนักเรียน…" style="width:100%">
-          </div>
-          <label class="check-row" style="margin:0 0 8px"><input type="checkbox" id="rsLatest" checked> แสดงเฉพาะครั้งล่าสุดของแต่ละคน</label>
-        </div>
+      <div class="rs-stats" id="rsStats"></div>
+      <div class="rs-classsum class-table-wrap" id="rsClassSum"></div>
+      <div class="rs-actions">
+        <button class="btn" type="button" id="rsReload">↻ โหลดใหม่</button>
+        <button class="btn" type="button" id="rsCsv">ส่งออก CSV</button>
+        <a class="btn" id="rsStudentLink" target="_blank" rel="noopener" hidden>เปิดลิงก์นักเรียน</a>
+      </div>
+      <div class="class-table-wrap"><table class="class-table" id="rsTable"></table></div>
+      <p><small>คลิกที่แถวเพื่อดูคำตอบรายข้อ</small></p>
 
-        <div class="rs-stats" id="rsStats"></div>
-        <div class="rs-classsum class-table-wrap" id="rsClassSum"></div>
-
-        <div class="rs-actions">
-          <button class="btn" type="button" id="rsReload">↻ โหลดใหม่</button>
-          <button class="btn" type="button" id="rsCsv">ส่งออก CSV</button>
-          <a class="btn" id="rsSheet" target="_blank" rel="noopener">เปิดใน Google Sheets</a>
-          <button class="btn ghost" type="button" id="rsLogout">ออกจากระบบ</button>
-        </div>
-
-        <div class="class-table-wrap">
-          <table class="class-table" id="rsTable"></table>
-        </div>
-        <p><small>คลิกที่แถวเพื่อดูคำตอบรายข้อ</small></p>
+      <!-- การเชื่อมต่อ MCP -->
+      <div class="rs-section">
+        <h2>เชื่อมต่อ AI (MCP)</h2>
+        <h3>1. MCP บนเว็บ: ใช้ใน Claude.ai / แอป Claude ไม่ต้องติดตั้ง</h3>
+        <p>ให้ AI สร้างใบงานจากหัวข้อ แล้วได้ลิงก์สำหรับนักเรียนทันที และถาม AI เรื่องคะแนนแต่ละห้องได้</p>
+        <div id="rsMcpBox"></div>
+        <ol>
+          <li>กด <b>สร้างกุญแจ MCP</b> แล้วคัดลอก URL ด้านบน (<b>อย่าแชร์ให้ผู้อื่น</b>: ใครมี URL นี้จะเข้าถึงคะแนนของคุณได้)</li>
+          <li>ใน Claude.ai: <b>Settings → Connectors → Add custom connector</b> ตั้งชื่อ เช่น «ใบงานไทย» แล้ววาง URL</li>
+          <li>ในแชต ลองพิมพ์: «สร้างใบงาน 10 ข้อ เรื่องระบบสุริยะ ป.6 สำหรับห้อง ป.6/1 และ ป.6/2» หรือ «สรุปคะแนนใบงานล่าสุดแยกตามห้อง»</li>
+        </ol>
+        <h3>2. MCP ในเครื่อง: แปลง PDF หรือรูปภาพเป็นใบงาน</h3>
+        <p>ใช้กับแอป AI บนคอมพิวเตอร์ (Claude Code, Claude Desktop, Codex…) ต้องมี Node.js 18+ และ Chrome หรือ Edge คัดลอกข้อความนี้ไปวางในแชตของ AI:</p>
+        <code class="rs-code" id="rsLocalPrompt"></code>
+        <button class="btn small" type="button" id="rsCopyLocal">คัดลอกคำสั่งติดตั้ง</button>
       </div>
     </section>
   </main>

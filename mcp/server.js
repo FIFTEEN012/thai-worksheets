@@ -77,7 +77,7 @@ const FIELD_SPEC = {
     bold: { type: 'boolean', description: 'label: texto en negrita.' },
     align: { type: 'string', description: 'label: "left", "center" o "right".' },
     fontScale: { type: 'number', description: 'Multiplicador del tamaño de letra (1 por defecto).' },
-    fontFamily: { type: 'string', description: 'Fuente propia del campo: atkinson, lexend, opendyslexic, andika, patrick, nunito, lora o mono.' },
+    fontFamily: { type: 'string', description: 'Fuente propia del campo: sarabun (ไทย, por defecto), notothai (ไทย con bucle, para primaria), atkinson, lexend, opendyslexic, andika, patrick, nunito, lora o mono.' },
     rotate: { type: 'number', description: 'label/formas: giro en grados.' },
     bg: { type: 'string', description: 'Campos de respuesta: color de fondo.' },
     bgOpacity: { type: 'number', description: 'Campos de respuesta: opacidad del fondo, de 0 a 1.' },
@@ -188,7 +188,7 @@ const TOOLS = [
         paperColor: { type: 'string', description: 'Color de la hoja opcional (#RRGGBB).' },
         textColor: { type: 'string', description: 'Color del texto opcional (#RRGGBB); se corrige si no tiene contraste suficiente.' },
         cardColor: { type: 'string', description: 'Color de las tarjetas opcional (#RRGGBB).' },
-        fontFamily: { type: 'string', description: 'atkinson, lexend, opendyslexic, andika, patrick, nunito, lora o mono.' },
+        fontFamily: { type: 'string', description: 'sarabun (ไทย, por defecto), notothai, atkinson, lexend, opendyslexic, andika, patrick, nunito, lora o mono.' },
         cards: { type: 'boolean', description: 'Agrupar visualmente las preguntas en tarjetas suaves (sí por defecto).' },
         header: { type: 'boolean', description: 'Añadir cabecera con el título cuando haya sitio (sí por defecto).' }
       }
@@ -320,8 +320,8 @@ const TOOLS = [
         title: { type: 'string' },
         author: { type: 'string' },
         instructions: { type: 'string' },
-        lang: { type: 'string', description: 'Código de idioma: es, ca, en, eu…' },
-        settings: { type: 'object', description: 'Ajustes del manifiesto (showScore, showCorrection, shuffle, maxAttempts…).' }
+        lang: { type: 'string', description: 'Código de idioma: th (por defecto en esta versión tailandesa), en, es…' },
+        settings: { type: 'object', description: 'Ajustes del manifiesto (showScore, showCorrection, shuffle, maxAttempts…). onlineSubmit.classes = lista de clases que el alumnado elige, p. ej. ["ม.1/1","ม.1/2"].' }
       }
     },
     run: a => session.setMeta(a)

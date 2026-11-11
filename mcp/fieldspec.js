@@ -76,7 +76,7 @@ const TYPES = {
     defRect: { w: 0.26, h: 0.05 },
     build: s => ({
       correct: s.correct !== false && s.correct !== 'false' && s.correct !== 0,
-      labels: asList(s.labels).length === 2 ? asList(s.labels).map(String) : ['Verdadero', 'Falso']
+      labels: asList(s.labels).length === 2 ? asList(s.labels).map(String) : ['ถูก', 'ผิด']
     })
   },
   gaps: {

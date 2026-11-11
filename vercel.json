@@ -1,0 +1,14 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "cleanUrls": false,
+  "rewrites": [
+    { "source": "/mcp/:key", "destination": "/api/mcp?key=:key" }
+  ],
+  "functions": {
+    "api/mcp.js": { "includeFiles": "js/**", "maxDuration": 30 }
+  },
+  "headers": [
+    { "source": "/(.*)", "headers": [{ "key": "X-Content-Type-Options", "value": "nosniff" }] },
+    { "source": "/(js|css|fonts|vendor)/(.*)", "headers": [{ "key": "Cache-Control", "value": "public, max-age=300" }] }
+  ]
+}

@@ -2,7 +2,24 @@
 
 เว็บแอปสำหรับครู เปลี่ยน PDF หรือรูปภาพให้เป็นใบงานออนไลน์ที่ตรวจคำตอบอัตโนมัติ วางช่องคำตอบลงบนเอกสาร กำหนดคำตอบที่ถูกและคะแนน แล้วแชร์ลิงก์หรือคิวอาร์โค้ดให้นักเรียนทำในเบราว์เซอร์ หรือจะเริ่มจากหน้าว่างก็ได้
 
-ไม่ต้องมีเซิร์ฟเวอร์ ไม่ต้องสมัครบัญชี และทุกอย่างทำงานในเบราว์เซอร์
+**เว็บไซต์: <https://thai-worksheets.vercel.app>** · ห้องครู (ดูคะแนน/MCP): <https://thai-worksheets.vercel.app/resultados.html>
+
+นักเรียนไม่ต้องสมัครบัญชี เปิดลิงก์แล้วทำได้ทันที เมื่อกดส่ง คะแนนจะเข้าบัญชีครูอัตโนมัติ และครูดูคะแนนแยกตามห้องได้
+
+## โครงสร้างระบบ
+
+| ส่วน | ที่อยู่ | หน้าที่ |
+|---|---|---|
+| หน้าเว็บ (static) | Vercel | ตัวแก้ไข หน้านักเรียน ห้องครู (ไฟล์ HTML/JS เดิมของ OpenWorksheets + ฉบับไทย) |
+| API | Vercel Functions (`api/`) | `auth` บัญชีครู · `submit` รับคะแนน · `results` อ่าน/ลบคะแนน · `worksheet` จดใบงาน/ส่งไฟล์ใบงาน · `mcp` เซิร์ฟเวอร์ MCP บนเว็บ |
+| ฐานข้อมูล | Neon Postgres (โปรเจกต์ `thai-worksheets`, สิงคโปร์) | ตาราง `teachers`, `worksheets`, `submissions` |
+| ดาวน์โหลดใบงานจาก Google Drive | Google Apps Script ของผู้ดูแล (`gas/Code.gs`, `config.js` → `gasUrl`) | Drive ไม่อนุญาตให้เว็บอื่นดาวน์โหลดตรง |
+| MCP ในเครื่อง | `mcp/` (ดู [mcp/README.th.md](mcp/README.th.md)) | แปลง PDF/รูปภาพเป็นใบงานจากแอป AI บนคอมพิวเตอร์ |
+
+ตัวแปรสภาพแวดล้อมบน Vercel: `DATABASE_URL`, `SESSION_SECRET`, `SIGNUP_CODE` (รหัสที่ครูต้องใช้สมัคร), `SITE_URL`
+บัญชีครูบัญชีแรกที่สมัครจะเป็นผู้ดูแลระบบ ใบงานที่ไม่มีรหัสครู (ใบงานเก่า) จะส่งคะแนนเข้าบัญชีผู้ดูแลระบบ
+
+เว็บเดิมบน GitHub Pages (`fifteen012.github.io/thai-worksheets`) จะพาไปหน้าเดียวกันบน Vercel อัตโนมัติ ลิงก์นักเรียนเดิมจึงยังใช้ได้
 
 ดัดแปลงจาก [OpenWorksheets](https://github.com/openworksheets/openworksheets.github.io) (AGPL-3.0) โดยใช้ [REA](https://github.com/morluto/rea) วิเคราะห์โครงสร้างแอปก่อนแก้ไข ดูผลวิเคราะห์ได้ที่ [docs/rea-analysis-th.md](docs/rea-analysis-th.md)
 

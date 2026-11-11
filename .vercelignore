@@ -1,0 +1,8 @@
+.claude
+tests
+mcp
+docs
+gas
+*.md
+!README.md
+.env*
