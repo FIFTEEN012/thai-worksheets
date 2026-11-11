@@ -42,6 +42,14 @@ async function readBody(resp, onProgress) {
   return out;
 }
 
+// บอกว่าได้อะไรกลับมาแทน ZIP (ช่วยวินิจฉัย เช่น หน้า HTML ของ Google)
+function describeNotZip(bytes) {
+  if (!bytes || !bytes.length) return 'ไม่ได้รับข้อมูล';
+  const head = new TextDecoder().decode(bytes.slice(0, 120)).replace(/s+/g, ' ').trim();
+  if (/<!doctype html|<html/i.test(head)) return 'ได้หน้าเว็บ HTML แทนไฟล์ (มักเกิดเพราะไฟล์ไม่ได้แชร์แบบสาธารณะ)';
+  return 'ได้ข้อมูลที่ไม่ใช่ ZIP (' + bytes.length + ' ไบต์): ' + head.slice(0, 60);
+}
+
 function looksLikeZip(bytes) {
   return bytes.length > 4 && bytes[0] === 0x50 && bytes[1] === 0x4b;
 }
@@ -53,7 +61,7 @@ async function tryDirect(url, onProgress) {
   if (!looksLikeZip(bytes)) {
     // Drive devuelve una página HTML intermedia para archivos grandes
     // o no públicos: no sirve como ZIP.
-    throw new Error('La respuesta no es un archivo ZIP.');
+    throw new Error('ไฟล์ที่ได้ไม่ใช่ ZIP — ' + describeNotZip(bytes));
   }
   return bytes;
 }
@@ -72,8 +80,10 @@ async function gasJson(query) {
 }
 
 function concatParts(parts, size) {
-  let total = Number(size) || 0;
-  if (!total) for (const p of parts) total += p ? p.length : 0;
+  // ขนาดที่เซิร์ฟเวอร์แจ้งอาจเป็นขนาดหลังบีบอัด (gzip) จึงห้ามตัดข้อมูลจริงทิ้ง
+  let sum = 0;
+  for (const p of parts) sum += p ? p.length : 0;
+  const total = Math.max(Number(size) || 0, sum);
   const out = new Uint8Array(total);
   let offset = 0;
   for (const p of parts) { if (p && p.length) { out.set(p, offset); offset += p.length; } }
@@ -110,7 +120,7 @@ async function gasPart(gasUrl, url, part, chunkSize) {
 // proxy tarde mucho y acabe devolviendo 404/timeout. No requiere cambios en el GAS.
 async function tryGas(url, onProgress) {
   const gasUrl = config().gasUrl;
-  if (!gasUrl) throw new Error('Sin proxy configurado');
+  if (!gasUrl) throw new Error('ยังไม่ได้ตั้งค่า Apps Script');
 
   let chunkSize = GAS_CHUNK;
   let totalSize = 0;
@@ -139,8 +149,15 @@ async function tryGas(url, onProgress) {
     const workers = [];
     for (let k = 0; k < Math.min(GAS_MAX_PARALLEL, totalParts); k++) workers.push(worker());
     await Promise.all(workers);
+    // ขนาดที่แจ้งมาน้อยกว่าจริง: ถ้าส่วนสุดท้ายเต็มขนาด ให้ดึงต่อจนครบ
+    for (let i = totalParts; i < 1000 && parts[i - 1] && parts[i - 1].length >= chunkSize; i++) {
+      const data = await gasPart(gasUrl, url, i, chunkSize);
+      const bytes = base64ToBytes(data.base64 || '');
+      if (!bytes.length) break;
+      parts[i] = bytes;
+    }
     const out = concatParts(parts, totalSize);
-    if (!looksLikeZip(out)) throw new Error('El proxy no devolvió un ZIP.');
+    if (!looksLikeZip(out)) throw new Error('Apps Script ส่งกลับมาไม่ใช่ ZIP — ' + describeNotZip(out));
     return out;
   }
 
@@ -161,7 +178,7 @@ async function tryGas(url, onProgress) {
     if (bytes.length < chunkSize) break; // última parte
   }
   const out = concatParts(parts);
-  if (!looksLikeZip(out)) throw new Error('El proxy no devolvió un ZIP.');
+  if (!looksLikeZip(out)) throw new Error('Apps Script ส่งกลับมาไม่ใช่ ZIP — ' + describeNotZip(out));
   return out;
 }
 
@@ -175,7 +192,7 @@ async function tryCorsProxies(url, onProgress) {
       lastError = e;
     }
   }
-  throw lastError || new Error('Sin proxies disponibles');
+  throw lastError || new Error('ไม่มีช่องทางสำรอง');
 }
 
 // Metadatos ligeros del recurso remoto (validadores HTTP) para detectar cambios
@@ -215,34 +232,33 @@ async function attemptDownload(url, status, onProgress) {
   const preferGas = isGoogleDriveUrl(url) && Boolean(config().gasUrl);
 
   if (!preferGas) {
-    status('Descargando la ficha…');
+    status('กำลังดาวน์โหลดใบงาน…');
     try {
       return await tryDirect(url, onProgress);
     } catch (e) {
-      errors.push('directa: ' + e.message);
+      errors.push('ดาวน์โหลดตรง: ' + e.message);
     }
   }
 
   if (config().gasUrl) {
-    status(preferGas ? 'Conectando con Google Drive…' : 'Descargando a través del proxy…');
+    status(preferGas ? 'กำลังเชื่อมต่อ Google Drive…' : 'กำลังดาวน์โหลดผ่าน Apps Script…');
     try {
       return await tryGas(url, onProgress);
     } catch (e) {
-      errors.push('proxy: ' + e.message);
+      errors.push('Apps Script: ' + e.message);
     }
   }
 
-  status('Intentando rutas alternativas…');
+  status('กำลังลองช่องทางสำรอง…');
   try {
     return await tryCorsProxies(url, onProgress);
   } catch (e) {
-    errors.push('alternativas: ' + e.message);
+    errors.push('ช่องทางสำรอง: ' + e.message);
   }
 
   const err = new Error(
-    'No se pudo descargar la ficha. Comprueba que el archivo es público ' +
-    '("cualquier persona con el enlace") y que la URL es correcta.\n' +
-    'Detalle: ' + errors.join(' · ')
+    'ดาวน์โหลดใบงานไม่สำเร็จ ตรวจสอบว่าไฟล์แชร์แบบ «ทุกคนที่มีลิงก์» และลิงก์ถูกต้อง\n' +
+    'รายละเอียด: ' + errors.join(' · ')
   );
   err.detail = errors;
   throw err;
@@ -263,7 +279,7 @@ export async function downloadZip(url, { onStatus, onProgress } = {}) {
       } catch (e) {
         lastError = e;
         if (intento < DOWNLOAD_TRIES) {
-          status('La descarga falló, reintentando…');
+          status('ดาวน์โหลดไม่สำเร็จ กำลังลองใหม่…');
           await sleep(800 * intento);
         }
       }
