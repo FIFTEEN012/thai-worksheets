@@ -1,0 +1,477 @@
+// Registro de los tipos de campo autocorregibles.
+// Cada tipo define su nombre, un glifo (SVG Lucide) para la paleta del editor,
+// el tamaño inicial del rectángulo (en fracciones de página) y su
+// configuración por defecto.
+
+import { t } from './i18n.js';
+import { ICONS } from './icons.js';
+
+function normTableSize(n, min, max, fallback) {
+  const v = parseInt(n, 10);
+  if (!Number.isInteger(v)) return fallback;
+  return Math.max(min, Math.min(max, v));
+}
+
+function normalizeTableAnswerList(value) {
+  const arr = Array.isArray(value) ? value : [value ?? ''];
+  const out = arr.map(v => String(v ?? ''));
+  return out.length ? out : [''];
+}
+
+// Tipos de celda admitidos en «Tabla editable»: 'text' acepta texto libre y
+// 'number' corrige por valor con tolerancia. Una celda de cualquier tipo puede
+// además marcarse como desplegable (cellSelect): entonces sus varias respuestas
+// se ofrecen como opciones y el alumnado elige una; la correcta es cellCorrect.
+export const TABLE_CELL_TYPES = ['text', 'number'];
+
+function normTableCellType(v) {
+  return TABLE_CELL_TYPES.includes(v) ? v : 'text';
+}
+
+export function normalizeTableConfig(cfg = {}) {
+  const rows = normTableSize(cfg.rows, 1, 12, 3);
+  const cols = normTableSize(cfg.cols, 1, 8, 3);
+  const rowHeaders = Array.from({ length: rows }, (_, r) => String(cfg.rowHeaders?.[r] ?? ''));
+  const colHeaders = Array.from({ length: cols }, (_, c) => String(cfg.colHeaders?.[c] ?? ''));
+  const cellAnswers = Array.from({ length: rows }, (_, r) =>
+    Array.from({ length: cols }, (_, c) =>
+      normalizeTableAnswerList(cfg.cellAnswers?.[r]?.[c] ?? cfg.cells?.[r]?.[c] ?? '')
+    )
+  );
+  const cells = Array.from({ length: rows }, (_, r) =>
+    Array.from({ length: cols }, (_, c) => cellAnswers[r][c][0] ?? '')
+  );
+  const examples = Array.from({ length: rows }, (_, r) =>
+    Array.from({ length: cols }, (_, c) => Boolean(cfg.examples?.[r]?.[c]))
+  );
+  const cellTypes = Array.from({ length: rows }, (_, r) =>
+    Array.from({ length: cols }, (_, c) => normTableCellType(cfg.cellTypes?.[r]?.[c]))
+  );
+  const cellTolerance = Array.from({ length: rows }, (_, r) =>
+    Array.from({ length: cols }, (_, c) => {
+      const n = parseFloat(String(cfg.cellTolerance?.[r]?.[c] ?? '').replace(',', '.'));
+      return Number.isFinite(n) && n > 0 ? n : 0;
+    })
+  );
+  const cellSelect = Array.from({ length: rows }, (_, r) =>
+    Array.from({ length: cols }, (_, c) => Boolean(cfg.cellSelect?.[r]?.[c]))
+  );
+  const cellCorrect = Array.from({ length: rows }, (_, r) =>
+    Array.from({ length: cols }, (_, c) => {
+      const n = parseInt(cfg.cellCorrect?.[r]?.[c], 10);
+      return Number.isInteger(n) && n >= 0 ? n : 0;
+    })
+  );
+  const correctMode = ['cell', 'row', 'col'].includes(cfg.correctMode) ? cfg.correctMode : 'cell';
+  return {
+    rows,
+    cols,
+    rowHeaders,
+    colHeaders,
+    cells,
+    cellAnswers,
+    examples,
+    cellTypes,
+    cellTolerance,
+    cellSelect,
+    cellCorrect,
+    correctMode,
+    showRowHeaders: Boolean(cfg.showRowHeaders),
+    showColHeaders: Boolean(cfg.showColHeaders),
+    ignoreCase: cfg.ignoreCase !== false,
+    ignoreAccents: cfg.ignoreAccents !== false,
+    collapseSpaces: cfg.collapseSpaces !== false
+  };
+}
+
+// Comprueba si una respuesta es correcta para una celda concreta, según su
+// tipo (texto/número/desplegable) y las opciones de normalización de la tabla.
+// Compartido por la corrección (grading) y el realce visual del modo alumno.
+// `normalizeText` y `parseDecimal` se inyectan para no acoplar este módulo
+// con util.js (que importa íconos, etc.).
+export function tableCellMatches(cfg, r, c, value, { normalizeText, parseDecimal }) {
+  const accepted = (cfg.cellAnswers?.[r]?.[c] || []).filter(a => String(a ?? '').trim());
+  if (!accepted.length) return null; // celda sin respuesta esperada: no se corrige
+  const given = String(value ?? '');
+  if (!given.trim()) return false;
+  const norm = s => normalizeText(s, cfg);
+  // Desplegable: solo la opción marcada como correcta puntúa.
+  if (cfg.cellSelect?.[r]?.[c]) {
+    const correctVal = tableCellCorrectValue(cfg, r, c);
+    return Boolean(correctVal) && norm(given) === norm(correctVal);
+  }
+  const type = cfg.cellTypes?.[r]?.[c] || 'text';
+  if (type === 'number') {
+    const v = parseDecimal(given);
+    if (isNaN(v)) return false;
+    const tol = Math.abs(parseDecimal(cfg.cellTolerance?.[r]?.[c])) || 0;
+    return accepted.some(a => {
+      const target = parseDecimal(a);
+      return !isNaN(target) && Math.abs(v - target) <= tol + 1e-9;
+    });
+  }
+  return accepted.some(a => norm(given) === norm(a));
+}
+
+// Opciones visibles de una celda desplegable (sus respuestas no vacías).
+export function tableCellOptions(cfg, r, c) {
+  return (cfg.cellAnswers?.[r]?.[c] || []).map(a => String(a ?? '')).filter(a => a.trim());
+}
+
+// Valor de la opción correcta de una celda desplegable. Usa el índice
+// cellCorrect dentro de la lista de respuestas; si apunta a una celda vacía,
+// cae en la primera respuesta no vacía.
+export function tableCellCorrectValue(cfg, r, c) {
+  const answers = (cfg.cellAnswers?.[r]?.[c] || []).map(a => String(a ?? ''));
+  const idx = cfg.cellCorrect?.[r]?.[c] ?? 0;
+  const picked = String(answers[idx] ?? '').trim();
+  if (picked) return answers[idx];
+  return answers.find(a => a.trim()) || '';
+}
+
+export const FIELD_TYPES = {
+  text: {
+    name: 'Respuesta corta',
+    glyph: ICONS.type,
+    defRect: { w: 0.24, h: 0.05 },
+    defaults: () => ({
+      answers: [''],
+      ignoreCase: true,
+      ignoreAccents: true,
+      collapseSpaces: true
+    })
+  },
+  number: {
+    name: 'Respuesta numérica',
+    glyph: ICONS.calculator,
+    defRect: { w: 0.16, h: 0.05 },
+    defaults: () => ({ answer: '', tolerance: 0 })
+  },
+  // Respuesta con fórmula: el alumno escribe una fórmula matemática o química
+  // con el editor visual EdiCuaTeX. Se autocorrige comparando el LaTeX (sin
+  // delimitadores ni espacios) con las respuestas aceptadas.
+  formula: {
+    name: 'Fórmula',
+    glyph: ICONS.sigma,
+    defRect: { w: 0.24, h: 0.06 },
+    defaults: () => ({ answers: [''] })
+  },
+  // Respuesta larga: texto extenso con formato (negrita, cursiva, enlaces) y
+  // fórmulas LaTeX. No se autocorrige: lo puntúa el profesor al revisar la
+  // entrega (queda «pendiente» hasta entonces), igual que la grabación de voz.
+  essay: {
+    name: 'Respuesta larga',
+    glyph: ICONS.fileText,
+    defRect: { w: 0.5, h: 0.16 },
+    defaults: () => ({ prompt: '', promptBold: true, promptColor: '', promptAlign: 'left', promptScale: 1, rows: 4, maxWords: 0, showFormula: true })
+  },
+  single: {
+    name: 'Opción única',
+    glyph: ICONS.circleDot,
+    defRect: { w: 0.3, h: 0.14 },
+    defaults: () => ({ options: ['ตัวเลือก 1', 'ตัวเลือก 2', 'ตัวเลือก 3'], correct: 0 })
+  },
+  truefalse: {
+    name: 'Verdadero / falso',
+    glyph: ICONS.toggleLeft,
+    defRect: { w: 0.26, h: 0.06 },
+    defaults: () => ({ correct: true, labels: ['ถูก', 'ผิด'] })
+  },
+  multi: {
+    name: 'Opción múltiple',
+    glyph: ICONS.checkSquare,
+    defRect: { w: 0.3, h: 0.16 },
+    defaults: () => ({ options: ['ตัวเลือก 1', 'ตัวเลือก 2', 'ตัวเลือก 3'], correct: [0], partial: false })
+  },
+  checkbox: {
+    name: 'Casillas',
+    glyph: ICONS.squareCheck,
+    defRect: { w: 0.035, h: 0.025 },
+    defaults: () => ({ boxes: [], multiple: false, correct: [], partial: false })
+  },
+  select: {
+    name: 'Desplegable',
+    glyph: ICONS.chevronsUpDown,
+    defRect: { w: 0.2, h: 0.05 },
+    defaults: () => ({ options: ['ตัวเลือก 1', 'ตัวเลือก 2'], correct: 0 })
+  },
+  table: {
+    name: 'Tabla editable',
+    glyph: ICONS.table,
+    defRect: { w: 0.42, h: 0.2 },
+    defaults: () => normalizeTableConfig({
+      rows: 3,
+      cols: 3,
+      showColHeaders: true,
+      colHeaders: ['สัตว์', 'ประเภท', 'อาหาร'],
+      rowHeaders: ['ตัวอย่าง 1', 'ตัวอย่าง 2', 'ตัวอย่าง 3'],
+      cells: [
+        ['สุนัข', 'สัตว์เลี้ยงลูกด้วยนม', 'กินทั้งพืชและสัตว์'],
+        ['นกอินทรี', 'สัตว์ปีก', 'กินเนื้อ'],
+        ['ปลาเทราต์', 'ปลา', 'กินเนื้อ']
+      ],
+      examples: [
+        [true, true, false],
+        [false, false, false],
+        [false, false, false]
+      ],
+      cellAnswers: [
+        [['สุนัข'], ['สัตว์เลี้ยงลูกด้วยนม'], ['กินทั้งพืชและสัตว์']],
+        [['นกอินทรี'], ['สัตว์ปีก'], ['กินเนื้อ']],
+        [['ปลาเทราต์'], ['ปลา'], ['กินเนื้อ']]
+      ]
+    })
+  },
+  gaps: {
+    name: 'Completar huecos',
+    glyph: ICONS.penLine,
+    defRect: { w: 0.45, h: 0.12 },
+    defaults: () => ({
+      text: 'น้ำเดือดที่อุณหภูมิ [100] องศาเซลเซียส',
+      ignoreCase: true,
+      ignoreAccents: true,
+      collapseSpaces: true
+    })
+  },
+  textboxes: {
+    name: 'Huecos en documento',
+    glyph: ICONS.textCursorInput,
+    defRect: { w: 0.12, h: 0.045 },
+    defaults: () => ({
+      boxes: [],
+      ignoreCase: true,
+      ignoreAccents: true,
+      collapseSpaces: true
+    })
+  },
+  // Entrada virtual de la paleta: agrupa «Completar huecos» (gaps) y «Huecos en
+  // documento» (textboxes). No es un tipo de campo real (no se crea con este id):
+  // al elegirla, el editor pregunta el modo y arma la herramienta gaps o textboxes.
+  fillgaps: {
+    name: 'Rellenar huecos',
+    glyph: ICONS.rectangleEllipsis,
+    virtual: true
+  },
+  match: {
+    name: 'Emparejar',
+    glyph: ICONS.arrowLeftRight,
+    defRect: { w: 0.42, h: 0.18 },
+    defaults: () => ({
+      pairs: [
+        { left: 'รายการ ก', right: 'คู่ของ ก' },
+        { left: 'รายการ ข', right: 'คู่ของ ข' }
+      ],
+      distractors: []
+    })
+  },
+  order: {
+    name: 'Ordenar',
+    glyph: ICONS.arrowUpDown,
+    defRect: { w: 0.34, h: 0.18 },
+    defaults: () => ({ items: ['ลำดับที่ 1', 'ลำดับที่ 2', 'ลำดับที่ 3'] })
+  },
+  dragdrop: {
+    name: 'Arrastrar a zonas',
+    glyph: ICONS.move,
+    defRect: { w: 0.4, h: 0.09 },
+    // mode: '' = sin elegir (el editor pregunta el medio al configurar);
+    //       'labels' = etiquetas escritas en una bandeja (clásico);
+    //       'crops'  = recortes marcados sobre el propio PDF, que parten de su
+    //                  sitio y dejan el hueco vacío al arrastrarlos.
+    defaults: () => ({ zones: [], distractors: [], mode: '', pieces: [] })
+  },
+  arrowmatch: {
+    name: 'Unir con flechas',
+    glyph: ICONS.gitCompare,
+    defRect: { w: 0.6, h: 0.4 },
+    defaults: () => {
+      const mk = () => Math.random().toString(36).slice(2, 9);
+      const [la, lb, ra, rb] = [mk(), mk(), mk(), mk()];
+      return {
+        items: [
+          { id: la, side: 'left',  label: 'รายการ ก', src: '' },
+          { id: lb, side: 'left',  label: 'รายการ ข', src: '' },
+          { id: ra, side: 'right', label: 'คู่ของ ก',   src: '' },
+          { id: rb, side: 'right', label: 'คู่ของ ข',   src: '' },
+        ],
+        pairs: [{ from: la, to: ra }, { from: lb, to: rb }]
+      };
+    }
+  },
+  // Paquete SCORM 1.2: contenido interactivo autocorregible. Es gradable: su
+  // nota (cmi.core.score.raw o el estado de finalización) se integra en la
+  // puntuación de la ficha. Los archivos del paquete se guardan descomprimidos
+  // en state.files bajo el prefijo config.pkg ('scorm/<uid>/').
+  scorm: {
+    name: 'SCORM (1.2)',
+    glyph: ICONS.package,
+    defRect: { w: 0.6, h: 0.45 },
+    defaults: () => ({
+      pkg: '',          // prefijo de carpeta en state.files, p. ej. 'scorm/<uid>/'
+      entryHref: '',    // recurso de entrada (href del primer SCO del manifest)
+      title: '',
+      scoreMode: 'scorm',  // 'scorm' = usa score.raw ; 'completion' = aprobado/suspendido
+      showMenu: true,      // mostrar el menú de navegación lateral del paquete
+      toc: [],             // árbol de navegación cacheado del imsmanifest
+      title: '', caption: '', align: 'left', frameColor: '#1d2c42', frameWidth: 0
+    })
+  },
+  // Grabación de voz: el alumno graba audio con el micrófono. No es
+  // autocorregible. Dos modos de puntuación:
+  //   'manual'        → el profesor pone la nota al revisar la entrega
+  //                     (cuenta como «pendiente» hasta entonces).
+  //   'participation' → automática: grabar algo = puntos completos.
+  // El audio viaja incrustado en la entrega (data-URL base64); por su tamaño,
+  // la presencia de este campo deshabilita la entrega por enlace (solo archivo).
+  record: {
+    name: 'Grabación de voz',
+    glyph: ICONS.mic,
+    defRect: { w: 0.4, h: 0.1 },
+    defaults: () => ({ scoreMode: 'manual', maxSec: 30, prompt: '', promptBold: true, promptColor: '', promptAlign: 'left', promptScale: 1 })
+  },
+  // Elementos decorativos: no puntúan ni cuentan como preguntas.
+  label: {
+    name: 'Texto',
+    glyph: ICONS.pencil,
+    decor: true,
+    defRect: { w: 0.3, h: 0.05 },
+    defaults: () => ({ text: 'ข้อความ', color: '#1d2c42', bold: false, align: 'left' })
+  },
+  cover: {
+    name: 'Tapar zona',
+    glyph: ICONS.coverZone,
+    decor: true,
+    defRect: { w: 0.25, h: 0.07 },
+    defaults: () => ({ color: '#ffffff', opacity: 1 })
+  },
+  image: {
+    name: 'Imagen',
+    glyph: ICONS.image,
+    decor: true,
+    defRect: { w: 0.4, h: 0.3 },
+    defaults: () => ({ src: '' })
+  },
+  // Multimedia decorativo: no puntúa. provider 'url' (YouTube/Vimeo/enlace
+  // directo) o 'file' (archivo subido, en state.files bajo config.src).
+  video: {
+    name: 'Vídeo',
+    glyph: ICONS.film,
+    decor: true,
+    defRect: { w: 0.5, h: 0.32 },
+    defaults: () => ({ provider: 'url', url: '', src: '', controls: true, autoplay: false, muted: false, loop: false, title: '', caption: '', align: 'left' })
+  },
+  audio: {
+    name: 'Audio',
+    glyph: ICONS.volume,
+    decor: true,
+    defRect: { w: 0.5, h: 0.08 },
+    defaults: () => ({ provider: 'file', url: '', src: '', controls: true, autoplay: false, loop: false, title: '', caption: '', align: 'left' })
+  },
+  // Inserción de contenido externo. El modo se elige al configurar el campo:
+  //   'url'  → se incrusta una URL en un iframe
+  //   'html' → código pegado; se muestra aislado de la ficha (buildEmbedHtml)
+  //   'zip'  → web completa en un .zip (index + css/js/carpetas), servida por SW
+  //   'elpx' → paquete de eXeLearning (.elpx, que es un .zip con una web dentro)
+  // Los modos 'zip'/'elpx' guardan sus archivos en state.files bajo config.pkg
+  // ('embed/<uid>/') y la entrada en config.entryHref, igual que SCORM.
+  embed: {
+    name: 'Insertar (Web/HTML)',
+    glyph: ICONS.code,
+    decor: true,
+    defRect: { w: 0.5, h: 0.3 },
+    defaults: () => ({ mode: '', url: '', html: '', pkg: '', entryHref: '', title: '', caption: '', align: 'left', frameColor: '#1d2c42', frameWidth: 0 })
+  },
+  // Formas de dibujo: para componer fichas desde una hoja en blanco.
+  // Línea / Flecha: la misma forma, con puntas de flecha opcionales (heads:
+  // 'none' = línea, 'end' = una punta, 'both' = dos puntas).
+  line: {
+    name: 'Línea / Flecha',
+    glyph: ICONS.minus,
+    decor: true,
+    defRect: { w: 0.25, h: 0.02 },
+    defaults: () => ({ color: '#1d2c42', width: 2, style: 'solid', dir: 'h', heads: 'none', invert: false })
+  },
+  // Tipo heredado: las fichas antiguas con «Flecha» se siguen renderizando, pero
+  // ya no se crea desde la paleta (se migra a `line` con puntas al cargar).
+  arrow: {
+    name: 'Flecha',
+    glyph: ICONS.arrowRight,
+    decor: true,
+    defRect: { w: 0.25, h: 0.02 },
+    defaults: () => ({ color: '#1d2c42', width: 2, style: 'solid', dir: 'h', invert: false, double: false })
+  },
+  rect: {
+    name: 'Rectángulo',
+    glyph: ICONS.rectH,
+    decor: true,
+    defRect: { w: 0.25, h: 0.12 },
+    defaults: () => ({ color: '#1d2c42', width: 2, style: 'solid', noStroke: false, fill: '', fillOpacity: 1, borderRadius: 0, square: false })
+  },
+  ellipse: {
+    name: 'Elipse',
+    glyph: ICONS.circle,
+    decor: true,
+    defRect: { w: 0.2, h: 0.12 },
+    defaults: () => ({ color: '#1d2c42', width: 2, style: 'solid', noStroke: false, fill: '', fillOpacity: 1, circle: false })
+  },
+  // Polígono regular de N lados (3 = triángulo, 4 = rombo, 5 = pentágono…).
+  polygon: {
+    name: 'Polígono',
+    glyph: ICONS.pentagon,
+    decor: true,
+    defRect: { w: 0.18, h: 0.18 },
+    defaults: () => ({ sides: 5, color: '#1d2c42', width: 2, style: 'solid', noStroke: false, fill: '', fillOpacity: 1, regular: true })
+  }
+};
+
+export const FIELD_ORDER = [
+  'text', 'formula', 'number', 'essay', 'single', 'truefalse', 'multi', 'checkbox',
+  'select', 'table', 'gaps', 'textboxes', 'match', 'order', 'dragdrop', 'arrowmatch',
+  'record', 'embed', 'scorm',
+  'label', 'cover', 'image', 'video', 'audio', 'line', 'rect', 'polygon', 'ellipse'
+];
+
+// Grupos temáticos de la paleta del editor. El nombre visible
+// se obtiene de i18n con la clave 'palette.<id>'.
+export const PALETTE_GROUPS = [
+  { id: 'write',  glyph: ICONS.messageSquare,   types: ['text', 'formula', 'number', 'essay', 'table', 'fillgaps', 'record'] },
+  { id: 'choose', glyph: ICONS.listChecks,      types: ['single', 'multi', 'checkbox', 'truefalse', 'select'] },
+  { id: 'relate', glyph: ICONS.arrowLeftRight,  types: ['match', 'order', 'dragdrop', 'arrowmatch'] },
+  { id: 'external', glyph: ICONS.package,        types: ['embed', 'scorm'] },
+  { id: 'design', glyph: ICONS.shapes,          types: ['label', 'image', 'video', 'audio', 'cover', 'line', 'rect', 'polygon', 'ellipse'] }
+];
+
+export function isDecorField(type) {
+  return Boolean(FIELD_TYPES[type]?.decor);
+}
+
+const SHAPE_TYPES = new Set(['line', 'arrow', 'rect', 'polygon', 'ellipse']);
+
+export function isShapeField(type) {
+  return SHAPE_TYPES.has(type);
+}
+
+export function fieldTypeName(type) {
+  return t('field.' + type) || (FIELD_TYPES[type] ? FIELD_TYPES[type].name : type);
+}
+
+// Extrae los huecos de un texto con marcadores [respuesta|alternativa].
+// Devuelve una lista de segmentos: { kind: 'text'|'gap', value | answers }.
+export function parseGaps(text) {
+  const segments = [];
+  const re = /\[([^\]]*)\]/g;
+  let last = 0;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > last) segments.push({ kind: 'text', value: text.slice(last, m.index) });
+    const answers = m[1].split('|').map(s => s.trim()).filter(Boolean);
+    segments.push({ kind: 'gap', answers: answers.length ? answers : [''] });
+    last = re.lastIndex;
+  }
+  if (last < text.length) segments.push({ kind: 'text', value: text.slice(last) });
+  return segments;
+}
+
+export function gapCount(text) {
+  return parseGaps(text).filter(s => s.kind === 'gap').length;
+}

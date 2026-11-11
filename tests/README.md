@@ -1,0 +1,128 @@
+# Tests de OpenWorksheets
+
+Pruebas de integración que se ejecutan en un navegador real.
+
+Necesitan Node.js, Chromium en `/usr/bin/chromium` y `puppeteer-core`, que se
+instala una sola vez desde la raíz del proyecto con `npm install`. Para pasarlas
+todas de una vez:
+
+```bash
+npm test          # o bien: bash tests/run_all.sh
+```
+
+Levanta el servidor en el puerto 8765, pasa cada prueba, dice cuáles fallan y
+dónde está su registro, y cierra el servidor. Conviene pasarlo antes de publicar
+una versión: si una prueba falla, algo falla, en el programa o en la prueba.
+
+Para pasar solo algunas:
+
+```bash
+# Desde la raíz del proyecto:
+python3 -m http.server 8765 &
+
+# Con las dependencias instaladas (npm install) y Chromium en el sistema:
+node tests/run_headless.js tests/test_pdf.html tests/test_zip.html tests/test_player.html
+```
+
+También pueden abrirse directamente en el navegador
+(`http://localhost:8765/tests/test_player.html`): el resultado aparece en
+pantalla y termina con `__TEST_OK__` o `__TEST_FAIL__`.
+
+- `test_player.html` — visor del alumno completo: identificación, respuesta de
+  los distintos tipos de campo, autoguardado, corrección, nota, marcas e intentos.
+- `test_zip.html` — exportación e importación del ZIP de ficha en el navegador.
+- `test_webexport.html` — exportación a página web autónoma (*Archivo → Exportar
+  a web*): comprueba que el ZIP incluye el visor, el `index.html` de arranque y
+  la ficha empaquetada reabrible, y que no arrastra el editor.
+- `test_pdf.html` — conversión de PDF a imágenes de página con pdf.js.
+- `test_ampos.html` — precisión de posición de los hotspots de «Unir con
+  flechas» en el visor respecto a la imagen de fondo (tolerancia < 1 px).
+- `test_imgfield.html` — el campo imagen decorativa ocupa exactamente la caja
+  dibujada (altura fija, no la proporción natural de la imagen).
+- `run_chrome_detect.js` — búsqueda del navegador que usa el servidor MCP
+  (`mcp/chrome.js`): simula las variables de entorno y las rutas de Windows,
+  macOS y Linux, de modo que la detección de cada sistema se comprueba desde
+  cualquier ordenador. No necesita navegador ni servidor
+  (`node tests/run_chrome_detect.js`).
+- `run_mcp_ficha.js` — servidor MCP (`mcp/server.js`): habla el protocolo por
+  stdio como lo haría una IA y recorre el circuito completo (crear desde cero,
+  aplicar un tema visual, colocar formas, abrir un PDF, leer sus coordenadas,
+  colocar campos, previsualizar, ajustar, borrar y guardar el `.owpkg`). Con un
+  PDF propio: `node tests/run_mcp_ficha.js ruta/al.pdf`.
+  Necesita Chromium; no necesita el servidor del puerto 8765.
+- `run_ampos_editor.js` — script de puppeteer aparte: dibuja con el ratón las
+  áreas de un par de «Unir con flechas» en el editor real y comprueba que el
+  overlay y la vista previa coinciden al píxel
+  (`node tests/run_ampos_editor.js`, con el servidor en el puerto 8765).
+- `run_shapes_editor.js` — script de puppeteer aparte: comprueba la paleta
+  agrupada (acordeón) y las formas de dibujo (línea, flecha, rectángulo,
+  elipse): creación, configuración (puntas, relleno) y vista previa
+  (`node tests/run_shapes_editor.js`, con el servidor en el puerto 8765).
+- `run_crops_editor.js` — script de puppeteer aparte: modo «recortar del PDF»
+  de «Arrastrar a zonas»: alterna el modo, dibuja una zona, marca un recorte
+  (que recorta la imagen de la página), lo asigna a su zona y, en la vista
+  previa, lo coloca por clic dejando el hueco de origen vacío
+  (`node tests/run_crops_editor.js`, con el servidor en el puerto 8765).
+- `run_fillgaps_editor.js` — script de puppeteer aparte: entrada unificada
+  «Rellenar huecos» de la paleta; comprueba que pregunta el modo antes de
+  dibujar y que crea un campo «gaps» o «textboxes» según la elección
+  (`node tests/run_fillgaps_editor.js`, con el servidor en el puerto 8765).
+- `run_dirty_editor.js` — script de puppeteer aparte: comprueba el control de
+  cambios sin guardar del editor; una ficha nueva en blanco no debe pedir
+  confirmacion al reemplazarse, pero si despues de anadir un campo
+  (`node tests/run_dirty_editor.js`, con el servidor en el puerto 8765).
+- `run_zoom.js` — script de puppeteer aparte: zoom de página en el editor
+  (botones, Ctrl+rueda) y en el visor del alumno, y transición del acordeón
+  de la paleta (`node tests/run_zoom.js`, con el servidor en el puerto 8765).
+- `test_scorm.html` — lógica de SCORM 1.2 sin navegador-LMS: parseo del
+  `imsmanifest.xml` (árbol de navegación, recurso de entrada, detección de
+  versión), el runtime `window.API` (LMSInitialize/SetValue/Commit/Finish y
+  errores) y la conversión de la nota SCORM en puntuación de la ficha
+  (`node tests/run_headless.js tests/test_scorm.html`).
+- `run_scorm_editor.js` — script de puppeteer aparte: el campo SCORM en el
+  editor (grupo «Interactivo» de la paleta, creación dibujándolo y panel de
+  configuración con subida del paquete, modo de puntuación y menú)
+  (`node tests/run_scorm_editor.js`, con el servidor en el puerto 8765).
+- `test_player_scorm.html` — integración de extremo a extremo del campo SCORM
+  1.2 en el visor: el Service Worker sirve un SCO, este localiza `window.API`,
+  registra una nota (70/100) y se comprueba que se integra en la puntuación de
+  la ficha (7/10). Requiere `tests/scorm-sw.js` (copia del SW de la raíz, para
+  que el ámbito del worker cubra `/tests/`)
+  (`node tests/run_headless.js tests/test_player_scorm.html`).
+- `scorm-sw.js` — copia del Service Worker de la raíz, necesaria solo para que
+  los tests servidos desde `/tests/` puedan registrarlo dentro de su ámbito. En
+  la aplicación real el SW vive en la raíz.
+- `run_embed_editor.js` — script de puppeteer aparte: el campo «Insertar» con
+  selección de tipo (URL/HTML/ZIP/ELPX); al elegir «Web en ZIP» y subir
+  `web-ejemplo.zip`, comprueba que la web se sirve en vivo en el lienzo y que
+  «Cambiar tipo» reabre el selector
+  (`node tests/run_embed_editor.js`, con el servidor en el puerto 8765).
+- `run_smoke_editor.js` — comprobación básica del editor: paleta agrupada,
+  apertura de grupos, opciones de la pantalla de inicio, creación y borrado de
+  un campo y «ficha nueva».
+- `run_panel_check.js` — orden de las secciones del panel de propiedades
+  (Contenido · Tamaño y posición · Estilo) en varios tipos de campo.
+- `run_scroll_preserve_editor.js` — al crear, duplicar o pegar un campo, el
+  lienzo del editor conserva su desplazamiento vertical.
+- `run_origin_guard.js` — protección de dominio de `config.js`: el Apps Script
+  del autor solo se usa en el sitio oficial y en local.
+- `check_footer.js` — el pie de la portada: autoría, licencias, enlaces, aviso
+  de privacidad, uso de IA, créditos, mención VCER y que no hay contador.
+- `check_resumen.js` — «Copiar resumen» del alumnado: con nota copia la
+  puntuación; si la ficha oculta la nota, el botón está desactivado. Fabrica
+  sus propias fichas.
+- `test_classdetail.html` — tabla de clase: el detalle de una entrega se abre
+  al pulsar su fila y se cierra con ✕.
+- `test_scorm_export.html` — exportación de una ficha como paquete SCORM y
+  reapertura de la ficha que lleva dentro.
+- `test_scorm_run.html` — la ficha exportada como SCORM informa al LMS: localiza
+  su API, marca el intento y envía la nota y el estado (80/100, aprobado).
+- `shot_footer.js`, `shot_origin_guard.js` — no son pruebas: sacan capturas del
+  pie y del aviso de dominio ajeno para revisarlas a ojo.
+- `run_all.sh` — pasa todas las anteriores (salvo las capturas).
+- `web-ejemplo.zip` — web mínima (index.html + assets/style.css) para probar el
+  modo «Web en ZIP» del campo «Insertar».
+- `test_doc.pdf` — PDF mínimo usado por las pruebas.
+
+Nota: `--virtual-time-budget` de Chromium headless no espera a los hilos de
+codificación de imagen ni al worker de pdf.js; usa `run_headless.js` (espera real).

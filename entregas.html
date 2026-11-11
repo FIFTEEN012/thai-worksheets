@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OpenWorksheets · ดูและตรวจสอบงานที่ส่ง</title>
+  <meta name="description" content="เปิดไฟล์งานที่นักเรียนส่ง เพื่อดูคะแนน คำตอบในแต่ละข้อ และตรวจสอบว่าไม่ถูกแก้ไข">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="css/app.css">
+  <script>(function(){var t=localStorage.getItem('wpf-tema');if(t)document.documentElement.setAttribute('data-theme',t);})();</script>
+</head>
+<body>
+
+  <header class="topbar">
+    <a class="brand" href="index.html" title="กลับหน้าหลัก">OpenWorksheets <span class="tag" data-i18n="nav.tagline">fichas autocorregibles</span></a>
+    <span class="spacer"></span>
+    <select id="selLang" class="sel-lang" aria-label="ภาษา / Language">
+      <option value="th">ไทย</option>
+      <option value="es">Español</option>
+      <option value="ca">Català</option>
+      <option value="gl">Galego</option>
+      <option value="eu">Euskara</option>
+      <option value="en">English</option>
+    </select>
+    <button class="btn small ghost" id="btnTema" title="ธีม: อัตโนมัติ (ตามระบบ)"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="btn-icon"><rect width="20" height="14" x="2" y="3" rx="2"/><path d="M8 21h8M12 17v4"/></svg></button>
+    <a class="btn small" href="index.html" data-i18n="nav.backHome"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="btn-icon"><path d="m12 19-7-7 7-7M19 12H5"/></svg> กลับหน้าหลัก</a>
+  </header>
+
+  <main class="page-wrap">
+
+    <section id="verifySection" class="card steps-box anim-in">
+      <h1 class="page-title" data-i18n="index.verifyTitle">Ver y verificar una entrega</h1>
+      <p data-i18n="index.verifyDesc">Abre uno o varios archivos de entrega para ver la puntuación, las respuestas a cada pregunta y comprobar si se han editado a mano. También puedes recibir la entrega mediante un enlace que el alumnado te envía al terminar la ficha.</p>
+      <button class="btn primary" id="btnVerificar" data-i18n="index.btnOpenEntregas">Abrir archivos de entrega (.owsub)</button>
+      <input type="file" id="inputEntrega" accept=".owsub" multiple style="display:none">
+      <p class="drop-hint" data-i18n="index.dropHint">También puedes arrastrar y soltar los archivos aquí.</p>
+      <div id="classTbl" style="display:none"></div>
+      <div id="salidaVerificacion" class="link-out" style="display:none"></div>
+    </section>
+
+  </main>
+
+  <footer class="pie">
+    <span data-i18n="index.footer">OpenWorksheets · aplicación web para crear fichas autocorregibles</span>
+    <span class="pie-linea">
+      <span>v<span data-app-version>1.0.0</span></span>
+      <span class="pie-sep">·</span>
+      <a href="https://bilateria.org" target="_blank" rel="noopener">© 2026 Juan José de Haro</a>
+      <span class="pie-sep">·</span>
+      <a href="https://github.com/openworksheets/openworksheets.github.io" target="_blank" rel="noopener">GitHub</a>
+      <span class="pie-sep">·</span>
+      <a href="https://github.com/openworksheets/openworksheets.github.io/issues" target="_blank" rel="noopener" data-i18n="footer.issues">Problemas y sugerencias</a>
+      <span class="pie-sep">·</span>
+      <a href="https://www.gnu.org/licenses/agpl-3.0.html" target="_blank" rel="noopener">AGPLv3</a>
+      <span class="pie-sep">·</span>
+      <details class="pie-priv">
+        <summary data-i18n="footer.privacy">Privacidad</summary>
+        <p data-i18n="footer.privacyNotice">OpenWorksheets no cuenta visitas ni recoge estadísticas de uso, y no usa cookies. Si una ficha está en Google Drive, se descarga a través de un servicio de Google del autor (Apps Script) y, si este falla, de uno público (corsproxy.io o cors.eu.org): por ellos pasa solo la ficha, nunca las respuestas. Los vídeos de YouTube o Vimeo que lleve una ficha se cargan desde esos servicios, en su modo de privacidad.</p>
+      </details>
+      <span class="pie-sep">·</span>
+      <details class="pie-priv">
+        <summary data-i18n="footer.ai">Uso de IA</summary>
+        <p data-i18n-html="footer.aiNotice">OpenWorksheets se ha programado con ayuda de IA, en <a href="https://jjdeharo.github.io/miae/?nivel=4" target="_blank" rel="noopener">cocreación, nivel 4 del MIAE</a>: el autor ha decidido el diseño y las funciones, y ha probado el programa numerosas veces, en situaciones diferentes, para detectar errores y aspectos que mejorar. Las ilustraciones de las fichas de ejemplo también se han generado con IA.</p>
+      </details>
+      <span class="pie-sep">·</span>
+      <details class="pie-priv">
+        <summary data-i18n="footer.credits">Créditos</summary>
+        <p data-i18n-html="footer.creditsNotice">Código con licencia AGPLv3 y contenidos con licencia <a href="https://creativecommons.org/licenses/by-sa/4.0/deed.es" target="_blank" rel="noopener">CC BY-SA 4.0</a>. Usa bibliotecas de otros autores (pdf.js, JSZip, MathJax y qrcode-generator), iconos de Lucide y tipografías libres, cada uno con su licencia libre: <a href="https://github.com/openworksheets/openworksheets.github.io/blob/main/vendor/TERCEROS.md" target="_blank" rel="noopener">autoría, procedencia y licencia de cada uno</a>.</p>
+      </details>
+    </span>
+    <span class="pie-linea">
+      <a href="https://vibe-coding-educativo.github.io/vibe-responsable/vcer/?r=recomendable&amp;p=100&amp;f=2026-10&amp;v=1.36.1&amp;t=OpenWorksheets&amp;u=https%3A%2F%2Fopenworksheets.github.io%2F" target="_blank" rel="noopener" data-i18n="footer.vcer">Evaluación VCER de la versión 1.36.1: Recomendable (100 %), octubre de 2026</a>
+    </span>
+  </footer>
+
+  <script src="config.js"></script>
+  <script src="js/theme.js"></script>
+  <script type="module" src="js/entregas.js"></script>
+</body>
+</html>

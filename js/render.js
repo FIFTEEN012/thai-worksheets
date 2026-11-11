@@ -1,0 +1,2314 @@
+// Renderizado de los campos interactivos en modo alumno.
+//
+// renderField(field, pageLayer, ctx) crea el campo dentro de la capa de la
+// página y devuelve un controlador:
+//   { field, root, getAnswer(), setAnswer(a), isAnswered(),
+//     setDisabled(b), mark(result, expectedText) }
+//
+// ctx = { rng, shuffle, onChange }
+//   - rng: generador con semilla, para que el barajado persista en la sesión.
+//   - shuffle: si la ficha baraja las opciones de single/multi/select.
+//     (match, order y dragdrop se barajan siempre: su orden delataría la solución).
+
+import { el, shuffled, shuffledIndices, normalizeText, parseDecimal } from './util.js';
+import { parseGaps, normalizeTableConfig, tableCellMatches, tableCellOptions } from './fieldtypes.js';
+import { fontStack } from './fonts.js';
+import { mdToHtml } from './markdown.js';
+import { Scorm12Runtime } from './scorm.js';
+import { t } from './i18n.js';
+import { typesetMath, textHasMath } from './mathrender.js';
+import { openFormulaEditor, wrapFormula, insertAtCursor } from './edicuatex.js';
+import { ICONS } from './icons.js';
+
+function promptStyle(cfg) {
+  const parts = [];
+  if (cfg.promptBold === true) parts.push('font-weight:700');
+  else if (cfg.promptBold === false) parts.push('font-weight:400');
+  if (cfg.promptColor) parts.push(`color:${cfg.promptColor}`);
+  if (cfg.promptAlign && cfg.promptAlign !== 'left') parts.push(`text-align:${cfg.promptAlign}`);
+  const scale = parseFloat(cfg.promptScale);
+  if (scale && scale !== 1) parts.push(`font-size:${scale}em`);
+  return parts.join(';');
+}
+
+// SVG de una casilla de verificación dibujable (campo checkbox).
+// El marco se ve siempre; la marca (✓) se muestra al estar activada vía CSS.
+// preserveAspectRatio mantiene la casilla cuadrada dentro de cualquier rectángulo.
+export const CHECKBOX_SVG =
+  '<svg class="wpf-cb-svg" viewBox="0 0 24 24" preserveAspectRatio="xMidYMid meet" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">' +
+  '<rect class="wpf-cb-frame" x="2.5" y="2.5" width="19" height="19" rx="3.5"/>' +
+  '<path class="wpf-cb-tick" d="M6 12.5 10 16.5 18 7.5"/></svg>';
+
+export function renderField(field, pageLayer, ctx) {
+  const root = el('div', { class: `wpf-field wpf-field-${field.type}`, dataset: { id: field.id } });
+  positionRect(root, field.rect);
+  if (field.rotate) root.style.transform = `rotate(${field.rotate}deg)`;
+  root.style.setProperty('--fs', field.fontScale || 1);
+  if (field.config?.bg) {
+    const hex = field.config.bg;
+    const op = field.config.bgOpacity ?? 1;
+    const r = parseInt(hex.slice(1, 3), 16);
+    const g = parseInt(hex.slice(3, 5), 16);
+    const b = parseInt(hex.slice(5, 7), 16);
+    root.style.setProperty('--field-bg', `rgba(${r},${g},${b},${op})`);
+  }
+  if (field.config?.fgColor) root.style.setProperty('--field-fg', field.config.fgColor);
+  if (field.fontFamily) root.style.setProperty('--field-font', fontStack(field.fontFamily));
+  pageLayer.appendChild(root);
+
+  const maker = renderers[field.type];
+  const inner = maker ? maker(field, root, ctx) : emptyRenderer();
+
+  const ctl = {
+    field,
+    root,
+    getAnswer: inner.getAnswer,
+    setAnswer: inner.setAnswer,
+    isAnswered: inner.isAnswered,
+    setDisabled(b) {
+      root.classList.toggle('disabled', b);
+      inner.setDisabled(b);
+    },
+    mark(result, expected) {
+      root.classList.remove('mark-ok', 'mark-ko', 'mark-partial', 'mark-blank');
+      const cls = result.ok === true ? 'mark-ok'
+        : result.ok === 'partial' ? 'mark-partial'
+        : result.ok === 'pending' ? 'mark-pending'
+        : result.ok === 'blank' ? 'mark-blank' : 'mark-ko';
+      root.classList.add(cls);
+      let badge = root.querySelector(':scope > .wpf-badge');
+      if (!badge) {
+        badge = el('span', { class: 'wpf-badge' });
+        root.appendChild(badge);
+      }
+      badge.textContent = result.ok === true ? '✓' : result.ok === 'partial' ? '½' : result.ok === 'pending' ? '⋯' : '✗';
+      if (expected && result.ok !== true) {
+        let exp = root.querySelector(':scope > .wpf-expected');
+        if (!exp) {
+          exp = el('div', { class: 'wpf-expected' });
+          root.appendChild(exp);
+        }
+        exp.textContent = expected;
+      }
+      if (inner.markDetail) inner.markDetail(result);
+    },
+    clearMark() {
+      root.classList.remove('mark-ok', 'mark-ko', 'mark-partial', 'mark-blank');
+      root.querySelector(':scope > .wpf-badge')?.remove();
+      root.querySelector(':scope > .wpf-expected')?.remove();
+    }
+  };
+  return ctl;
+}
+
+export function positionRect(node, rect) {
+  node.style.left = (rect.x * 100) + '%';
+  node.style.top = (rect.y * 100) + '%';
+  node.style.width = (rect.w * 100) + '%';
+  node.style.minHeight = (rect.h * 100) + '%';
+}
+
+// Aplana el árbol de navegación SCORM (items anidados) a una lista en
+// preorden con la profundidad de cada elemento, para pintar el menú.
+function flattenToc(items, depth = 0, out = []) {
+  for (const it of items || []) {
+    out.push({ title: it.title, href: it.href, depth });
+    if (it.children && it.children.length) flattenToc(it.children, depth + 1, out);
+  }
+  return out;
+}
+
+function emptyRenderer() {
+  return {
+    getAnswer: () => null,
+    setAnswer: () => {},
+    isAnswered: () => false,
+    setDisabled: () => {}
+  };
+}
+
+function buildRichSelect({ options, ariaLabel, className = '', placeholder = '' }) {
+  const root = el('div', {
+    class: `${className} wpf-richselect`.trim(),
+    role: 'combobox',
+    'aria-haspopup': 'listbox',
+    'aria-expanded': 'false',
+    'aria-label': ariaLabel
+  });
+  const btn = el('button', {
+    type: 'button',
+    class: 'wpf-richselect-btn',
+    'aria-label': ariaLabel
+  });
+  const valueBox = el('span', { class: 'wpf-richselect-value is-placeholder' }, placeholder || '\u00A0');
+  const arrow = el('span', { class: 'wpf-richselect-arrow', 'aria-hidden': 'true' });
+  const menu = el('div', { class: 'wpf-richselect-menu', role: 'listbox' });
+  let value = '';
+  let disabled = false;
+  let open = false;
+  const optionBtns = [];
+
+  // Cada campo es un elemento posicionado con z-index propio, así que crea su
+  // contexto de apilamiento: el z-index del menú solo compite dentro de su
+  // campo y, entre campos, gana el último del DOM. Sin esto, el desplegable de
+  // una fila queda tapado por el campo de la fila siguiente. Se eleva el campo
+  // entero mientras el menú está abierto.
+  function liftField(on) {
+    root.closest('.wpf-field')?.classList.toggle('is-select-open', on);
+  }
+
+  function closeMenu() {
+    if (!open) return;
+    open = false;
+    root.classList.remove('is-open');
+    root.setAttribute('aria-expanded', 'false');
+    liftField(false);
+  }
+
+  function openMenu() {
+    if (disabled || open) return;
+    open = true;
+    root.classList.add('is-open');
+    root.setAttribute('aria-expanded', 'true');
+    liftField(true);
+  }
+
+  function renderValue(labelNode) {
+    valueBox.replaceChildren();
+    if (!labelNode) {
+      valueBox.classList.add('is-placeholder');
+      valueBox.textContent = placeholder || '\u00A0';
+      return;
+    }
+    valueBox.classList.remove('is-placeholder');
+    valueBox.appendChild(labelNode.cloneNode(true));
+  }
+
+  function setValue(next, emit = false) {
+    value = next ?? '';
+    let selectedLabel = null;
+    optionBtns.forEach(opt => {
+      const on = opt.dataset.value === value;
+      opt.classList.toggle('is-selected', on);
+      opt.setAttribute('aria-selected', on ? 'true' : 'false');
+      if (on) selectedLabel = opt.querySelector('.wpf-richselect-option-label');
+    });
+    renderValue(selectedLabel);
+    if (emit) root.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+
+  options.forEach(opt => {
+    const label = el('span', { class: 'wpf-richselect-option-label' }, opt.label);
+    const item = el('button', {
+      type: 'button',
+      class: 'wpf-richselect-option',
+      role: 'option',
+      dataset: { value: opt.value },
+      'aria-selected': 'false'
+    }, label);
+    item.addEventListener('click', () => {
+      if (disabled) return;
+      setValue(opt.value, true);
+      closeMenu();
+      btn.focus();
+    });
+    item.addEventListener('keydown', e => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        closeMenu();
+        btn.focus();
+      }
+    });
+    optionBtns.push(item);
+    menu.appendChild(item);
+  });
+
+  btn.append(valueBox, arrow);
+  btn.addEventListener('click', () => {
+    if (disabled) return;
+    if (open) closeMenu();
+    else openMenu();
+  });
+  btn.addEventListener('keydown', e => {
+    if (disabled) return;
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      openMenu();
+      const current = optionBtns.findIndex(opt => opt.dataset.value === value);
+      const target = current >= 0 ? current : 0;
+      optionBtns[target]?.focus();
+    } else if (e.key === 'Escape') {
+      closeMenu();
+    }
+  });
+
+  document.addEventListener('pointerdown', e => {
+    if (!root.contains(e.target)) closeMenu();
+  });
+  root.addEventListener('focusout', () => {
+    requestAnimationFrame(() => {
+      if (!root.contains(document.activeElement)) closeMenu();
+    });
+  });
+
+  Object.defineProperty(root, 'value', {
+    get: () => value,
+    set: next => { setValue(String(next ?? '')); }
+  });
+  Object.defineProperty(root, 'disabled', {
+    get: () => disabled,
+    set: next => {
+      disabled = Boolean(next);
+      root.classList.toggle('disabled', disabled);
+      btn.disabled = disabled;
+      btn.setAttribute('aria-disabled', disabled ? 'true' : 'false');
+      optionBtns.forEach(opt => { opt.disabled = disabled; });
+      if (disabled) closeMenu();
+    }
+  });
+
+  root.append(btn, menu);
+  setValue('');
+  return root;
+}
+
+function buildTable(field, ctx) {
+  const cfg = normalizeTableConfig(field.config);
+  const table = el('table', { class: 'wpf-table-grid' });
+  const inputs = [];
+  if (cfg.showColHeaders) {
+    const thead = el('thead', {});
+    const tr = el('tr', {});
+    if (cfg.showRowHeaders) tr.appendChild(el('th', { class: 'corner' }, ''));
+    cfg.colHeaders.forEach((txt, i) => tr.appendChild(el('th', {}, txt || `C${i + 1}`)));
+    thead.appendChild(tr);
+    table.appendChild(thead);
+  }
+  const tbody = el('tbody', {});
+  cfg.cells.forEach((row, r) => {
+    const tr = el('tr', {});
+    if (cfg.showRowHeaders) tr.appendChild(el(cfg.showColHeaders ? 'th' : 'td', { class: 'rowhead' }, cfg.rowHeaders[r] || `F${r + 1}`));
+    row.forEach((cell, c) => {
+      const isExample = Boolean(cfg.examples?.[r]?.[c]);
+      if (isExample) {
+        tr.appendChild(el('td', { class: 'is-example' }, el('div', { class: 'wpf-table-example' }, cell)));
+        return;
+      }
+      const type = cfg.cellTypes?.[r]?.[c] || 'text';
+      const aria = t('render.tableCellAria', { r: r + 1, c: c + 1 });
+      let input;
+      if (cfg.cellSelect?.[r]?.[c]) {
+        const baseOpts = tableCellOptions(cfg, r, c);
+        const opts = ctx.shuffle ? shuffled(baseOpts, ctx.rng) : baseOpts;
+        input = buildRichSelect({
+          options: opts.map(o => ({ value: o, label: o })),
+          ariaLabel: aria,
+          className: 'wpf-input wpf-table-input wpf-table-select'
+        });
+        input.addEventListener('change', () => notify(ctx));
+      } else {
+        input = el('input', {
+          class: 'wpf-input wpf-table-input',
+          type: 'text',
+          inputmode: type === 'number' ? 'decimal' : undefined,
+          autocomplete: 'off',
+          'aria-label': aria
+        });
+        input.addEventListener('input', () => notify(ctx));
+      }
+      const td = el('td', {}, input);
+      tr.appendChild(td);
+      inputs.push({ r, c, input });
+    });
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  return { cfg, table, inputs };
+}
+
+// Construye el SVG de una forma de dibujo (line, arrow, rect, ellipse).
+// Compartido por el editor (vista previa) y el modo alumno.
+export function buildShapeSvg(field) {
+  const cfg = field.config || {};
+  const NS = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(NS, 'svg');
+  svg.setAttribute('class', 'wpf-shape');
+  const sw = Math.max(0.5, parseFloat(cfg.width) || 2);
+  const color = cfg.color || '#1d2c42';
+  const dash = cfg.style === 'dashed' ? `${sw * 3} ${sw * 2}`
+    : cfg.style === 'dotted' ? `0.1 ${sw * 2.2}` : '';
+
+  function stroke(node) {
+    node.setAttribute('stroke', color);
+    node.setAttribute('stroke-width', sw);
+    if (dash) {
+      node.setAttribute('stroke-dasharray', dash);
+      node.setAttribute('stroke-linecap', 'round');
+    }
+  }
+
+  if (field.type === 'rect' || field.type === 'ellipse') {
+    let node;
+    if (field.type === 'rect' && cfg.square) {
+      // Cuadrado: viewBox cuadrado + non-scaling-stroke para que el grosor no escale
+      svg.setAttribute('viewBox', '0 0 100 100');
+      svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+      node = document.createElementNS(NS, 'rect');
+      node.setAttribute('x', '0');
+      node.setAttribute('y', '0');
+      node.setAttribute('width', '100');
+      node.setAttribute('height', '100');
+      node.setAttribute('vector-effect', 'non-scaling-stroke');
+      const br = parseFloat(cfg.borderRadius) || 0;
+      if (br > 0) {
+        node.setAttribute('rx', String(br));
+        node.setAttribute('ry', String(br));
+      }
+    } else if (field.type === 'rect') {
+      node = document.createElementNS(NS, 'rect');
+      node.setAttribute('x', '0');
+      node.setAttribute('y', '0');
+      node.setAttribute('width', '100%');
+      node.setAttribute('height', '100%');
+      const br = parseFloat(cfg.borderRadius) || 0;
+      if (br > 0) {
+        node.setAttribute('rx', br + '%');
+        node.setAttribute('ry', br + '%');
+      }
+    } else if (cfg.circle) {
+      // Círculo: viewBox cuadrado para que sea redondo independientemente de las proporciones del campo.
+      // non-scaling-stroke evita que el grosor escale al redimensionar.
+      svg.setAttribute('viewBox', '0 0 100 100');
+      svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+      node = document.createElementNS(NS, 'circle');
+      node.setAttribute('cx', '50');
+      node.setAttribute('cy', '50');
+      node.setAttribute('r', '49');
+      node.setAttribute('vector-effect', 'non-scaling-stroke');
+    } else {
+      node = document.createElementNS(NS, 'ellipse');
+      node.setAttribute('cx', '50%');
+      node.setAttribute('cy', '50%');
+      node.setAttribute('rx', '50%');
+      node.setAttribute('ry', '50%');
+    }
+    node.setAttribute('fill', cfg.fill || 'none');
+    if (cfg.fill) node.setAttribute('fill-opacity', String(cfg.fillOpacity ?? 1));
+    if (cfg.noStroke) node.setAttribute('stroke', 'none');
+    else stroke(node);
+    svg.appendChild(node);
+  } else if (field.type === 'polygon') {
+    // Polígono regular de N lados. Se calculan los vértices en un círculo y luego
+    // se ajustan a la caja del viewBox para que toquen los bordes (en lugar de
+    // quedar inscritos en el círculo, que dejaba huecos). `regular` mantiene la
+    // forma (escala uniforme + meet); si no, se deforma para llenar la caja.
+    const sides = Math.max(3, Math.min(20, parseInt(cfg.sides, 10) || 5));
+    const regular = cfg.regular !== false;
+    const raw = [];
+    for (let i = 0; i < sides; i++) {
+      const a = -Math.PI / 2 + i * 2 * Math.PI / sides;
+      raw.push([Math.cos(a), Math.sin(a)]);
+    }
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    for (const [x, y] of raw) {
+      if (x < minX) minX = x; if (x > maxX) maxX = x;
+      if (y < minY) minY = y; if (y > maxY) maxY = y;
+    }
+    const pad = 3, avail = 100 - 2 * pad;
+    const bw = maxX - minX || 1, bh = maxY - minY || 1;
+    let sx, sy, ox, oy;
+    if (regular) {
+      const s = Math.min(avail / bw, avail / bh); // escala uniforme: conserva la forma
+      sx = sy = s;
+      ox = (100 - s * bw) / 2 - s * minX;
+      oy = (100 - s * bh) / 2 - s * minY;
+    } else {
+      sx = avail / bw; sy = avail / bh; // estira en cada eje hasta llenar la caja
+      ox = pad - sx * minX;
+      oy = pad - sy * minY;
+    }
+    const pts = raw.map(([x, y]) => (ox + sx * x).toFixed(2) + ',' + (oy + sy * y).toFixed(2));
+    svg.setAttribute('viewBox', '0 0 100 100');
+    svg.setAttribute('preserveAspectRatio', regular ? 'xMidYMid meet' : 'none');
+    const node = document.createElementNS(NS, 'polygon');
+    node.setAttribute('points', pts.join(' '));
+    node.setAttribute('vector-effect', 'non-scaling-stroke'); // grosor uniforme
+    node.setAttribute('fill', cfg.fill || 'none');
+    if (cfg.fill) node.setAttribute('fill-opacity', String(cfg.fillOpacity ?? 1));
+    if (cfg.noStroke) node.setAttribute('stroke', 'none');
+    else stroke(node);
+    svg.appendChild(node);
+  } else {
+    // Línea / Flecha: extremos según la dirección dentro de la caja, con puntas
+    // de flecha opcionales. `heads`: 'none' | 'end' | 'both'. El tipo heredado
+    // `arrow` se traduce a puntas (one/both según `double`).
+    const dirs = {
+      h:  ['0%', '50%', '100%', '50%'],
+      v:  ['50%', '0%', '50%', '100%'],
+      d1: ['0%', '0%', '100%', '100%'],
+      d2: ['0%', '100%', '100%', '0%']
+    };
+    const heads = field.type === 'arrow'
+      ? (cfg.double ? 'both' : 'end')
+      : (cfg.heads || 'none');
+    let [x1, y1, x2, y2] = dirs[cfg.dir] || dirs.h;
+    if (cfg.invert && heads === 'end') [x1, y1, x2, y2] = [x2, y2, x1, y1];
+    const ln = document.createElementNS(NS, 'line');
+    ln.setAttribute('x1', x1);
+    ln.setAttribute('y1', y1);
+    ln.setAttribute('x2', x2);
+    ln.setAttribute('y2', y2);
+    stroke(ln);
+    if (heads !== 'none') {
+      // id único: editor y vista previa pueden convivir en el mismo documento
+      const mid = 'wpfah-' + Math.random().toString(36).slice(2, 9);
+      const marker = document.createElementNS(NS, 'marker');
+      marker.setAttribute('id', mid);
+      marker.setAttribute('viewBox', '0 0 10 10');
+      marker.setAttribute('refX', '8');
+      marker.setAttribute('refY', '5');
+      marker.setAttribute('markerWidth', '5');
+      marker.setAttribute('markerHeight', '5');
+      marker.setAttribute('orient', 'auto-start-reverse');
+      const tip = document.createElementNS(NS, 'path');
+      tip.setAttribute('d', 'M0,0 L10,5 L0,10 z');
+      tip.setAttribute('fill', color);
+      marker.appendChild(tip);
+      const defs = document.createElementNS(NS, 'defs');
+      defs.appendChild(marker);
+      svg.appendChild(defs);
+      ln.setAttribute('marker-end', `url(#${mid})`);
+      if (heads === 'both') ln.setAttribute('marker-start', `url(#${mid})`);
+    }
+    svg.appendChild(ln);
+  }
+  return svg;
+}
+
+function shapeRenderer(field, root) {
+  // Altura exacta (como image): la caja debe coincidir con la del editor.
+  root.style.height = (field.rect.h * 100) + '%';
+  root.appendChild(buildShapeSvg(field));
+  return emptyRenderer();
+}
+
+function notify(ctx) {
+  if (ctx.onChange) ctx.onChange();
+}
+
+// ---------- Multimedia decorativo (vídeo / audio / inserción HTML) ----------
+
+// Convierte una URL en su forma incrustable. YouTube y Vimeo → iframe del
+// reproductor; cualquier otra cosa se trata como archivo directo (<video>/<audio>).
+function parseMediaUrl(url) {
+  const u = (url || '').trim();
+  if (!u) return null;
+  let m;
+  // YouTube se incrusta en su modo de privacidad mejorada (youtube-nocookie.com),
+  // que no pone cookies hasta que se reproduce el vídeo, y Vimeo con dnt=1, que
+  // evita las cookies que no son imprescindibles. Ninguno de los dos evita que
+  // el servicio reciba la IP al cargar el reproductor.
+  if ((m = u.match(/(?:youtube(?:-nocookie)?\.com\/(?:watch\?v=|embed\/|shorts\/)|youtu\.be\/)([\w-]{6,})/))) {
+    return { type: 'iframe', src: 'https://www.youtube-nocookie.com/embed/' + m[1] };
+  }
+  if ((m = u.match(/vimeo\.com\/(?:video\/)?(\d+)/))) {
+    return { type: 'iframe', src: 'https://player.vimeo.com/video/' + m[1] + '?dnt=1' };
+  }
+  return { type: 'file', src: u };
+}
+
+// Para el campo "Insertar -> URL" reutilizamos las mismas normalizaciones de
+// URL que en vídeo cuando la plataforma expone una ruta específica de iframe.
+function normalizeEmbedUrl(url) {
+  const parsed = parseMediaUrl(url);
+  return parsed?.type === 'iframe' ? parsed.src : (url || '').trim();
+}
+
+// Aplica las opciones de reproducción a un <video>/<audio>.
+function applyMediaOpts(node, cfg) {
+  node.controls = cfg.controls !== false;
+  if (cfg.autoplay) node.autoplay = true;
+  if (cfg.muted) node.muted = true;
+  if (cfg.loop) node.loop = true;
+  node.setAttribute('playsinline', '');
+}
+
+// Envuelve el medio con título y pie opcionales.
+function mediaFigure(field, bodyEl, extraClass) {
+  const cfg = field.config || {};
+  const fig = el('div', { class: 'wpf-media ' + extraClass });
+  const frameWidth = Math.max(0, parseFloat(cfg.frameWidth) || 0);
+  fig.style.setProperty('--media-frame-width', frameWidth + 'px');
+  fig.style.setProperty('--media-frame-color', cfg.frameColor || '#1d2c42');
+  if (frameWidth > 0) fig.classList.add('has-frame');
+  const textAlign = cfg.align || 'left';
+  if (cfg.title) fig.appendChild(el('div', { class: 'wpf-media-title', style: `text-align:${textAlign}` }, cfg.title));
+  fig.appendChild(el('div', { class: 'wpf-media-body' + (frameWidth > 0 ? ' has-frame' : '') }, bodyEl));
+  if (cfg.caption) fig.appendChild(el('div', { class: 'wpf-media-caption', style: `text-align:${textAlign}` }, cfg.caption));
+  return fig;
+}
+
+// Código de inserción pegado por el autor de la ficha (modo «html»). Nunca se
+// mete en la página de OpenWorksheets, donde podría leer o cambiar los
+// intentos, las entregas y los resultados guardados (ADR 5):
+//   - Si es solo uno o varios <iframe> de otra web (lo que dan YouTube,
+//     Genially, Canva…), se recrean con su dirección y sus permisos. Al ser de
+//     otro dominio, el navegador ya los aísla, y siguen funcionando igual.
+//   - Cualquier otro HTML va a un iframe con `sandbox` sin `allow-same-origin`:
+//     sus scripts se ejecutan, pero en un origen opaco, sin acceso a la ficha.
+const EMBED_IFRAME_ATTRS = ['allow', 'allowfullscreen', 'title', 'referrerpolicy', 'loading', 'name'];
+const EMBED_SANDBOX = 'allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-presentation allow-downloads';
+
+function onlyExternalIframes(html) {
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  const frames = [...doc.body.querySelectorAll('iframe')];
+  if (!frames.length) return null;
+  // Lo que no sea un iframe solo puede ser un envoltorio sin contenido activo
+  // (los div o p con estilos que añaden algunos servicios para el tamaño) o un
+  // script externo que solo ajusta la altura (el de H5P): se descarta, porque
+  // el campo ya tiene su tamaño en la página.
+  const wrappers = new Set(['DIV', 'P', 'SPAN', 'CENTER', 'FIGURE', 'BR']);
+  const resizer = node => node.tagName === 'SCRIPT' && node.hasAttribute('src') && !node.textContent.trim();
+  for (const node of doc.head.children) if (!resizer(node)) return null;
+  for (const node of doc.body.querySelectorAll('*')) {
+    if (node.tagName === 'IFRAME' || resizer(node)) continue;
+    if (!wrappers.has(node.tagName)) return null;
+    if ([...node.attributes].some(a => /^on/i.test(a.name))) return null;
+  }
+  const out = [];
+  for (const f of frames) {
+    let url;
+    try { url = new URL(f.getAttribute('src') || '', location.href); } catch { return null; }
+    if (!/^https?:$/.test(url.protocol) || url.origin === location.origin) return null;
+    if (/^(www\.)?youtube\.com$/.test(url.hostname) && url.pathname.startsWith('/embed/')) url.hostname = 'www.youtube-nocookie.com';
+    if (url.hostname === 'player.vimeo.com' && !url.searchParams.has('dnt')) url.searchParams.set('dnt', '1');
+    const attrs = { src: url.href, class: 'wpf-media-el' };
+    EMBED_IFRAME_ATTRS.forEach(a => { if (f.hasAttribute(a)) attrs[a] = f.getAttribute(a); });
+    if (!attrs.title) attrs.title = t('render.embedFrameTitle');
+    out.push(attrs);
+  }
+  return out;
+}
+
+function buildEmbedHtml(html, title) {
+  const frames = onlyExternalIframes(html);
+  if (frames) {
+    const box = el('div', { class: 'wpf-embed-html' });
+    frames.forEach(attrs => box.appendChild(el('iframe', attrs)));
+    return box;
+  }
+  const frame = el('iframe', {
+    class: 'wpf-media-el wpf-embed-sandbox', sandbox: EMBED_SANDBOX,
+    allow: 'fullscreen; autoplay; clipboard-write; encrypted-media; picture-in-picture',
+    allowfullscreen: '', title: title || t('render.embedFrameTitle')
+  });
+  frame.srcdoc = '<!doctype html><html><head><meta charset="utf-8"><base target="_blank">' +
+    '<style>html,body{margin:0;height:100%}iframe{border:0;width:100%;height:100%}</style>' +
+    '</head><body>' + html + '</body></html>';
+  return frame;
+}
+
+// Construye el contenido real de un medio (vídeo/audio/embed) con su título y pie.
+// `fileUrl` resuelve los archivos subidos; opts.editor desactiva la
+// autorreproducción (en el editor no queremos que arranque solo).
+export function buildMediaContent(field, fileUrl, opts = {}) {
+  const cfg = field.config || {};
+  const autoplay = opts.editor ? false : cfg.autoplay;
+  let body;
+  if (field.type === 'video') {
+    if (cfg.provider === 'file') {
+      const url = cfg.src && fileUrl ? fileUrl(cfg.src) : '';
+      if (url) { body = el('video', { src: url, class: 'wpf-media-el' }); applyMediaOpts(body, { ...cfg, autoplay }); }
+    } else {
+      const v = parseMediaUrl(cfg.url);
+      if (v && v.type === 'iframe') {
+        const params = [];
+        if (autoplay) { params.push('autoplay=1'); params.push('muted=1'); }
+        else if (cfg.muted) params.push('muted=1');
+        if (cfg.loop) params.push('loop=1');
+        const src = v.src + (params.length ? (v.src.includes('?') ? '&' : '?') + params.join('&') : '');
+        body = el('iframe', { src, class: 'wpf-media-el', allow: 'autoplay; fullscreen; picture-in-picture', allowfullscreen: '' });
+      } else if (v) {
+        body = el('video', { src: v.src, class: 'wpf-media-el' }); applyMediaOpts(body, { ...cfg, autoplay });
+      }
+    }
+  } else if (field.type === 'audio') {
+    const url = cfg.provider === 'file'
+      ? (cfg.src && fileUrl ? fileUrl(cfg.src) : '')
+      : (cfg.url || '').trim();
+    if (url) { body = el('audio', { src: url, class: 'wpf-media-el wpf-audio-el' }); applyMediaOpts(body, { ...cfg, autoplay }); }
+  } else if (field.type === 'embed') {
+    if (cfg.mode === 'html' && (cfg.html || '').trim()) {
+      body = buildEmbedHtml(cfg.html, cfg.title);
+    } else if (cfg.mode === 'zip' || cfg.mode === 'elpx') {
+      body = buildPackageIframe(field, opts.host, cfg.title);
+    } else if (cfg.mode === 'imscp') {
+      // IMS CP: misma vista que SCORM (menú de navegación + iframe). El runtime
+      // SCORM se inicializa pero el contenido IMS CP simplemente no lo llama.
+      return buildScormView(field, opts.host).el;
+    } else if ((cfg.url || '').trim()) {
+      body = el('iframe', {
+        src: normalizeEmbedUrl(cfg.url),
+        class: 'wpf-media-el',
+        allow: 'fullscreen; autoplay; clipboard-write; encrypted-media; picture-in-picture',
+        allowfullscreen: ''
+      });
+    }
+  }
+  if (!body) body = el('div', { class: 'wpf-media-empty' }, t('render.mediaEmpty'));
+  return mediaFigure(field, body, 'wpf-media-' + field.type);
+}
+
+// Iframe que carga una web empaquetada (embed zip/elpx) servida por el Service
+// Worker. La carga es asíncrona (aprovisionamiento del paquete).
+function buildPackageIframe(field, host, title) {
+  const cfg = field.config || {};
+  if (!host || !host.supported || !cfg.pkg || !cfg.entryHref) {
+    const msg = !cfg.pkg || !cfg.entryHref ? t('render.embedEmpty') : t('render.scormNeedsServer');
+    return el('div', { class: 'wpf-media-empty' }, msg);
+  }
+  const frame = el('iframe', {
+    class: 'wpf-media-el',
+    allow: 'fullscreen; autoplay; clipboard-write; encrypted-media; picture-in-picture',
+    allowfullscreen: '', title: title || ''
+  });
+  Promise.resolve(host.ready).then(async ok => {
+    if (!ok) return;
+    const base = await host.provision(host.token(field), cfg.pkg);
+    frame.src = base + encodeURI(cfg.entryHref);
+  }).catch(() => {});
+  return frame;
+}
+
+// Construye la vista de un paquete SCORM (menú de navegación + iframe del SCO),
+// crea su runtime y lo sirve mediante el Service Worker. La usan tanto el visor
+// del alumno como el lienzo del editor (vista en vivo, sin interacción).
+//
+//   host = { supported, ready, token(field), provision(token, pkg), studentName }
+//   opts.onCommit = callback al cambiar la nota/estado del SCORM
+//
+// Devuelve { el, runtime, lock }: si no hay soporte o paquete, `el` es un
+// mensaje y `runtime` es null.
+export function buildScormView(field, host, opts = {}) {
+  const cfg = field.config || {};
+
+  // Sin Service Worker (p. ej. al abrir el HTML como archivo local) o sin
+  // paquete cargado: no podemos servir el SCORM. Mensaje claro, sin runtime.
+  if (!host || !host.supported || !cfg.pkg || !cfg.entryHref) {
+    const msg = !cfg.pkg || !cfg.entryHref ? t('render.scormEmpty') : t('render.scormNeedsServer');
+    return { el: el('div', { class: 'wpf-scorm-msg' }, msg), runtime: null, lock: null };
+  }
+
+  const runtime = new Scorm12Runtime({ studentName: host.studentName });
+  let base = '';
+  let activeBtn = null;
+
+  // El SCO localiza el API subiendo por window.parent.API: lo apuntamos a este
+  // runtime antes de cargar.
+  const aimApi = () => { window.API = runtime; };
+
+  const frame = el('iframe', {
+    class: 'wpf-scorm-frame', allow: 'autoplay; fullscreen; microphone; camera',
+    allowfullscreen: '', title: cfg.title || 'SCORM'
+  });
+
+  function loadHref(href, btn) {
+    if (!base || !href) return;
+    aimApi();
+    frame.src = base + encodeURI(href);
+    if (activeBtn) activeBtn.classList.remove('active');
+    activeBtn = btn || null;
+    if (activeBtn) activeBtn.classList.add('active');
+  }
+
+  // Menú de navegación a partir del árbol del imsmanifest.
+  const flat = flattenToc(cfg.toc || []).filter(it => it.href);
+  const showMenu = cfg.showMenu !== false && flat.length > 1;
+  const menu = el('nav', { class: 'wpf-scorm-toc' });
+  if (!showMenu) menu.hidden = true;
+  if (showMenu) {
+    flat.forEach(it => {
+      const btn = el('button', {
+        class: 'wpf-scorm-tocitem', type: 'button',
+        style: `padding-left:${8 + it.depth * 14}px`,
+        onclick: () => loadHref(it.href, btn)
+      }, it.title || it.href);
+      menu.appendChild(btn);
+    });
+  }
+
+  // Capa que bloquea la interacción (tras la entrega en el visor).
+  const lock = el('div', { class: 'wpf-scorm-lock', hidden: '' });
+
+  const layout = el('div', { class: 'wpf-scorm-layout' + (showMenu ? ' has-menu' : '') }, menu,
+    el('div', { class: 'wpf-scorm-stage' }, frame, lock));
+
+  // Título y pie opcionales, igual que vídeo/audio/insertar.
+  const figure = mediaFigure(field, layout, 'wpf-media-scorm');
+
+  if (typeof opts.onCommit === 'function') runtime.onCommit(opts.onCommit);
+
+  // Carga inicial: esperamos a que el Service Worker tenga el paquete servido.
+  Promise.resolve(host.ready).then(async ok => {
+    if (!ok) { layout.appendChild(el('div', { class: 'wpf-scorm-msg' }, t('render.scormNeedsServer'))); return; }
+    const token = host.token(field);
+    base = await host.provision(token, cfg.pkg);
+    const firstBtn = showMenu ? menu.querySelector('.wpf-scorm-tocitem') : null;
+    loadHref(cfg.entryHref, firstBtn);
+  }).catch(() => {
+    layout.appendChild(el('div', { class: 'wpf-scorm-msg' }, t('render.scormNeedsServer')));
+  });
+
+  return { el: figure, runtime, lock };
+}
+
+const renderers = {
+
+  // Decorativos: no son preguntas, solo se muestran.
+  label(field, root) {
+    const cfg = field.config || {};
+    const div = el('div', {
+      class: 'wpf-label-text',
+      style: `color:${cfg.color || 'inherit'};font-weight:${cfg.bold ? '700' : '400'};text-align:${cfg.align || 'left'}`
+    });
+    div.innerHTML = mdToHtml(cfg.text || '');
+    root.appendChild(div);
+    return emptyRenderer();
+  },
+
+  cover(field, root) {
+    const cfg = field.config || {};
+    root.appendChild(el('div', {
+      class: 'wpf-cover-fill',
+      style: `background:${cfg.color || '#ffffff'};opacity:${cfg.opacity ?? 1}`
+    }));
+    return emptyRenderer();
+  },
+
+  image(field, root, ctx) {
+    const src = field.config?.src;
+    // Altura exacta: con solo min-height la imagen tomaría su proporción
+    // natural y no coincidiría con la caja dibujada en el editor.
+    root.style.height = (field.rect.h * 100) + '%';
+    if (src && ctx.fileUrl) {
+      const url = ctx.fileUrl(src);
+      if (url) root.appendChild(el('img', { src: url, class: 'wpf-img-decor', alt: '' }));
+    }
+    return emptyRenderer();
+  },
+
+  video(field, root, ctx) {
+    root.appendChild(buildMediaContent(field, ctx.fileUrl));
+    return emptyRenderer();
+  },
+
+  audio(field, root, ctx) {
+    root.appendChild(buildMediaContent(field, ctx.fileUrl));
+    return emptyRenderer();
+  },
+
+  embed(field, root, ctx) {
+    root.appendChild(buildMediaContent(field, ctx.fileUrl, { host: ctx.pkgHost }));
+    return emptyRenderer();
+  },
+
+  scorm(field, root, ctx) {
+    root.classList.add('wpf-scorm');
+    const view = buildScormView(field, ctx.pkgHost, { onCommit: () => notify(ctx) });
+    root.appendChild(view.el);
+
+    const runtime = view.runtime;
+    if (!runtime) return emptyRenderer();
+
+    // Si hay varios SCORM en la página, reapuntamos window.API al interactuar.
+    const aimApi = () => { window.API = runtime; };
+    root.addEventListener('pointerenter', aimApi);
+    root.addEventListener('focusin', aimApi);
+
+    return {
+      getAnswer: () => runtime.snapshot(),
+      setAnswer: snap => {
+        // Restaura una sesión guardada (autoguardado) sembrando el modelo cmi.
+        if (!snap || typeof snap !== 'object') return;
+        const d = runtime.data;
+        if (snap.suspend_data != null) d['cmi.suspend_data'] = String(snap.suspend_data);
+        if (snap.location != null) d['cmi.core.lesson_location'] = String(snap.location);
+        if (snap.status) d['cmi.core.lesson_status'] = String(snap.status);
+        if (snap.raw != null) d['cmi.core.score.raw'] = String(snap.raw);
+        if (snap.min != null) d['cmi.core.score.min'] = String(snap.min);
+        if (snap.max != null) d['cmi.core.score.max'] = String(snap.max);
+        // El SCO sabrá que es una reanudación.
+        if (snap.suspend_data || snap.location) d['cmi.core.entry'] = 'resume';
+      },
+      isAnswered: () => {
+        const s = runtime.snapshot().status;
+        return Boolean(s) && s !== 'not attempted';
+      },
+      setDisabled: b => { if (view.lock) view.lock.hidden = !b; }
+    };
+  },
+
+  // Grabación de voz: el alumno graba audio con el micrófono (MediaRecorder).
+  // La respuesta es un data-URL base64; no se persiste en el autoguardado
+  // (getSaveAnswer → '') para no llenar localStorage.
+  record(field, root, ctx) {
+    root.classList.add('wpf-record');
+    const cfg = field.config || {};
+    const maxSec = Math.max(5, Math.min(600, Number(cfg.maxSec) || 30));
+
+    if (cfg.prompt) root.appendChild(el('div', { class: 'wpf-record-prompt', style: promptStyle(cfg) }, cfg.prompt));
+
+    const supported = typeof window.MediaRecorder !== 'undefined'
+      && navigator.mediaDevices && navigator.mediaDevices.getUserMedia;
+
+    let dataUrl = '';
+    let disabled = false;
+    let recording = false;
+    let recorder = null;
+    let stream = null;
+    let chunks = [];
+    let tick = null;
+    let startedAt = 0;
+
+    const audioEl = el('audio', { class: 'wpf-record-audio' });
+    audioEl.controls = true;
+    audioEl.style.display = 'none';
+
+    const dot = el('span', { class: 'wpf-record-dot' });
+    const recLabel = el('span', {}, t('record.start'));
+    const recBtn = el('button', { class: 'wpf-record-btn', type: 'button' }, dot, recLabel);
+    const timeEl = el('span', { class: 'wpf-record-time' }, '');
+    const redoBtn = el('button', { class: 'wpf-record-redo', type: 'button' }, t('record.redo'));
+    redoBtn.style.display = 'none';
+    const hint = el('span', { class: 'wpf-record-hint' }, t('record.max', { s: maxSec }));
+
+    const fmt = s => Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+
+    function stopStream() {
+      if (stream) { stream.getTracks().forEach(tr => tr.stop()); stream = null; }
+    }
+
+    function showRecorded() {
+      audioEl.src = dataUrl;
+      audioEl.style.display = '';
+      redoBtn.style.display = disabled ? 'none' : '';
+      hint.style.display = 'none';
+    }
+
+    async function start() {
+      if (disabled || recording || !supported) return;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      } catch {
+        hint.textContent = t('record.denied');
+        hint.style.display = '';
+        hint.classList.add('wpf-record-error');
+        return;
+      }
+      chunks = [];
+      let mime = '';
+      const can = window.MediaRecorder.isTypeSupported?.bind(window.MediaRecorder);
+      if (can?.('audio/webm;codecs=opus')) mime = 'audio/webm;codecs=opus';
+      else if (can?.('audio/webm')) mime = 'audio/webm';
+      else if (can?.('audio/mp4')) mime = 'audio/mp4';
+      try {
+        recorder = new MediaRecorder(stream, mime ? { mimeType: mime, audioBitsPerSecond: 32000 } : { audioBitsPerSecond: 32000 });
+      } catch {
+        recorder = new MediaRecorder(stream);
+      }
+      recorder.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
+      recorder.onstop = () => {
+        stopStream();
+        const blob = new Blob(chunks, { type: recorder.mimeType || mime || 'audio/webm' });
+        const reader = new FileReader();
+        reader.onload = () => {
+          dataUrl = String(reader.result || '');
+          showRecorded();
+          notify(ctx);
+        };
+        reader.readAsDataURL(blob);
+      };
+      recorder.start();
+      recording = true;
+      startedAt = Date.now();
+      recBtn.classList.add('is-recording');
+      recLabel.textContent = t('record.stop');
+      audioEl.style.display = 'none';
+      redoBtn.style.display = 'none';
+      hint.style.display = 'none';
+      timeEl.textContent = '0:00';
+      tick = setInterval(() => {
+        const sec = Math.floor((Date.now() - startedAt) / 1000);
+        timeEl.textContent = fmt(sec);
+        if (sec >= maxSec) stop();
+      }, 250);
+    }
+
+    function stop() {
+      if (!recording) return;
+      recording = false;
+      clearInterval(tick);
+      recBtn.classList.remove('is-recording');
+      recLabel.textContent = t('record.start');
+      try { recorder.stop(); } catch { stopStream(); }
+    }
+
+    recBtn.addEventListener('click', () => { recording ? stop() : start(); });
+    redoBtn.addEventListener('click', () => {
+      if (disabled) return;
+      dataUrl = '';
+      audioEl.removeAttribute('src');
+      audioEl.style.display = 'none';
+      redoBtn.style.display = 'none';
+      timeEl.textContent = '';
+      hint.textContent = t('record.max', { s: maxSec });
+      hint.classList.remove('wpf-record-error');
+      hint.style.display = '';
+      notify(ctx);
+    });
+
+    if (!supported) {
+      recBtn.disabled = true;
+      hint.textContent = t('record.unsupported');
+      hint.classList.add('wpf-record-error');
+    }
+
+    root.appendChild(el('div', { class: 'wpf-record-bar' }, recBtn, timeEl, redoBtn, hint));
+    root.appendChild(audioEl);
+
+    return {
+      getAnswer: () => dataUrl || '',
+      // El audio no se guarda en el autoguardado (cuota de localStorage ~5 MB).
+      getSaveAnswer: () => '',
+      setAnswer: v => {
+        if (typeof v === 'string' && v.startsWith('data:')) { dataUrl = v; showRecorded(); }
+      },
+      isAnswered: () => Boolean(dataUrl),
+      setDisabled: b => {
+        disabled = b;
+        if (b && recording) stop();
+        recBtn.disabled = b;
+        redoBtn.style.display = b || !dataUrl ? 'none' : '';
+      }
+    };
+  },
+
+  line: shapeRenderer,
+  arrow: shapeRenderer,
+  rect: shapeRenderer,
+  polygon: shapeRenderer,
+  ellipse: shapeRenderer,
+
+  text(field, root, ctx) {
+    const input = el('input', {
+      class: 'wpf-input', type: 'text', autocomplete: 'off',
+      'aria-label': t('render.textAria')
+    });
+    input.addEventListener('input', () => notify(ctx));
+    root.appendChild(input);
+    return {
+      getAnswer: () => input.value,
+      setAnswer: v => { input.value = v ?? ''; },
+      isAnswered: () => input.value.trim() !== '',
+      setDisabled: b => { input.disabled = b; }
+    };
+  },
+
+  number(field, root, ctx) {
+    const input = el('input', {
+      class: 'wpf-input', type: 'text', inputmode: 'decimal', autocomplete: 'off',
+      'aria-label': t('render.numberAria')
+    });
+    input.addEventListener('input', () => notify(ctx));
+    root.appendChild(input);
+    return {
+      getAnswer: () => input.value,
+      setAnswer: v => { input.value = v ?? ''; },
+      isAnswered: () => input.value.trim() !== '',
+      setDisabled: b => { input.disabled = b; }
+    };
+  },
+
+  // Fórmula: el alumno escribe una fórmula con EdiCuaTeX (botón «fx») y ve su
+  // representación renderizada debajo del campo. La respuesta es el LaTeX
+  // (envuelto en \(…\)). Se autocorrige.
+  formula(field, root, ctx) {
+    root.classList.add('wpf-formula');
+    const input = el('input', {
+      class: 'wpf-input wpf-formula-input', type: 'text', autocomplete: 'off',
+      placeholder: t('render.formulaPlaceholder'), 'aria-label': t('render.formulaAria')
+    });
+    const fx = el('button', {
+      type: 'button', class: 'wpf-fx-btn',
+      title: t('render.toolFormula'), 'aria-label': t('render.toolFormula')
+    }, 'fx');
+    const preview = el('div', { class: 'wpf-formula-preview', 'aria-live': 'polite' });
+
+    const refresh = () => {
+      const v = input.value.trim();
+      const src = v ? (textHasMath(v) ? v : wrapFormula(v)) : '';
+      preview.classList.toggle('is-empty', !src);
+      preview.textContent = src || t('render.previewEmpty');
+      if (src) typesetMath(preview);
+    };
+
+    fx.addEventListener('mousedown', e => e.preventDefault()); // conservar el foco/selección
+    fx.addEventListener('click', () => {
+      if (input.disabled) return;
+      const ok = openFormulaEditor(input, { selectAllIfEmpty: true, onInsert: () => { refresh(); notify(ctx); } });
+      if (!ok) input.focus();
+    });
+    input.addEventListener('input', () => { refresh(); notify(ctx); });
+
+    root.appendChild(el('div', { class: 'wpf-formula-bar' }, input, fx));
+    root.appendChild(preview);
+    refresh();
+    return {
+      getAnswer: () => input.value,
+      setAnswer: v => { input.value = v ?? ''; refresh(); },
+      isAnswered: () => input.value.trim() !== '',
+      setDisabled: b => { input.disabled = b; fx.disabled = b; }
+    };
+  },
+
+  // Respuesta larga: texto extenso con formato (negrita, cursiva, enlaces) y
+  // fórmulas LaTeX, con vista previa renderizada. No se autocorrige: lo puntúa
+  // el profesor (queda «pendiente»).
+  essay(field, root, ctx) {
+    root.classList.add('wpf-essay');
+    const cfg = field.config || {};
+    if (cfg.prompt) root.appendChild(el('div', { class: 'wpf-essay-prompt', style: promptStyle(cfg) }, cfg.prompt));
+
+    const ta = el('textarea', {
+      class: 'wpf-input wpf-essay-input', rows: String(Math.max(2, Number(cfg.rows) || 4)),
+      placeholder: t('render.essayPlaceholder'), 'aria-label': t('render.essayAria')
+    });
+    const preview = el('div', { class: 'wpf-essay-preview', 'aria-live': 'polite' });
+
+    // Contador de palabras y límite opcional fijado por el profesor (0 = libre).
+    const maxWords = Math.max(0, Math.floor(Number(cfg.maxWords) || 0));
+    const counter = el('div', { class: 'wpf-essay-counter', 'aria-live': 'polite' });
+    // ภาษาไทยไม่เว้นวรรคระหว่างคำ: ถ้ามีอักษรไทยและเบราว์เซอร์รองรับ
+    // Intl.Segmenter จะตัดคำด้วยพจนานุกรมของเบราว์เซอร์แทนการนับตามช่องว่าง
+    const thSeg = (typeof Intl !== 'undefined' && Intl.Segmenter) ? new Intl.Segmenter('th', { granularity: 'word' }) : null;
+    const countWords = s => {
+      const str = String(s ?? '').trim();
+      if (thSeg && /[฀-๿]/.test(str)) {
+        let n = 0; for (const seg of thSeg.segment(str)) if (seg.isWordLike) n++;
+        return n;
+      }
+      const m = str.match(/\S+/g); return m ? m.length : 0;
+    };
+    let lastValue = ''; // último valor que respeta el límite (para bloquear excesos)
+    const updateCounter = () => {
+      const n = countWords(ta.value);
+      counter.textContent = maxWords > 0
+        ? t('render.wordCountLimit', { n, max: maxWords })
+        : t('render.wordCount', { n });
+      counter.classList.toggle('at-limit', maxWords > 0 && n >= maxWords);
+    };
+
+    let tHandle = null;
+    const refresh = () => {
+      clearTimeout(tHandle);
+      tHandle = setTimeout(() => {
+        const v = ta.value;
+        preview.classList.toggle('is-empty', !v.trim());
+        if (!v.trim()) { preview.textContent = t('render.previewEmpty'); return; }
+        preview.innerHTML = mdToHtml(v);
+        typesetMath(preview);
+      }, 200);
+    };
+
+    // Aplica el límite de palabras: si el nuevo valor lo supera, restaura el
+    // último válido (bloquea seguir escribiendo o pegar por encima del tope).
+    // Devuelve true si se actualizó (no se bloqueó).
+    const enforceLimit = () => {
+      if (maxWords > 0 && countWords(ta.value) > maxWords) {
+        const pos = Math.max(0, (ta.selectionStart || ta.value.length) - (ta.value.length - lastValue.length));
+        ta.value = lastValue;
+        try { ta.setSelectionRange(pos, pos); } catch { /* noop */ }
+        return false;
+      }
+      lastValue = ta.value;
+      return true;
+    };
+    const onEdited = () => { enforceLimit(); updateCounter(); refresh(); notify(ctx); };
+
+    // Inserta `before … after` alrededor de la selección (o un texto de ejemplo).
+    // insertAtCursor dispara el evento 'input', que recalcula y aplica el límite.
+    const wrapSel = (before, after, sample) => {
+      if (ta.disabled) return;
+      const s = ta.selectionStart ?? ta.value.length;
+      const e = ta.selectionEnd ?? ta.value.length;
+      const sel = ta.value.slice(s, e) || sample;
+      insertAtCursor(ta, before + sel + after);
+    };
+
+    const toolBtn = (icon, title, onClick) => {
+      const b = el('button', { type: 'button', class: 'wpf-tool-btn', title, 'aria-label': title });
+      b.innerHTML = icon;
+      b.addEventListener('mousedown', ev => ev.preventDefault());
+      b.addEventListener('click', onClick);
+      return b;
+    };
+
+    const bar = el('div', { class: 'wpf-essay-toolbar' },
+      toolBtn(ICONS.bold, t('render.toolBold'), () => wrapSel('**', '**', t('render.sampleBold'))),
+      toolBtn(ICONS.italic, t('render.toolItalic'), () => wrapSel('*', '*', t('render.sampleItalic'))),
+      toolBtn(ICONS.link, t('render.toolLink'), () => wrapSel('[', '](https://)', t('render.sampleLink'))));
+
+    // El botón de fórmulas es opcional: el profesor puede ocultarlo por campo y,
+    // a nivel de ficha, las fórmulas pueden estar deshabilitadas del todo
+    // (ctx.showFormula). En cualquiera de esos casos no se ofrece.
+    const showFormula = ctx.showFormula !== false && cfg.showFormula !== false;
+    let fx = null;
+    if (showFormula) {
+      fx = el('button', { type: 'button', class: 'wpf-fx-btn', title: t('render.toolFormula'), 'aria-label': t('render.toolFormula') }, 'fx');
+      fx.addEventListener('mousedown', e => e.preventDefault());
+      fx.addEventListener('click', () => {
+        if (ta.disabled) return;
+        const ok = openFormulaEditor(ta); // la inserción dispara 'input' → onEdited
+        if (!ok) ta.focus();
+      });
+      bar.appendChild(fx);
+    }
+
+    // Ayuda: explica qué hace cada botón (el alumnado no conoce esta notación).
+    // La línea de fórmulas solo se incluye si ese botón está disponible.
+    const helpItems = el('ul', {},
+      el('li', {}, t('render.helpBold')),
+      el('li', {}, t('render.helpItalic')),
+      el('li', {}, t('render.helpLink')));
+    if (showFormula) helpItems.appendChild(el('li', {}, t('render.helpFormula')));
+    const help = el('div', { class: 'wpf-essay-help', hidden: '' },
+      el('p', {}, t('render.helpIntro')),
+      helpItems);
+    const helpBtn = el('button', {
+      type: 'button', class: 'wpf-tool-btn wpf-help-btn',
+      title: t('render.help'), 'aria-label': t('render.help'), 'aria-expanded': 'false'
+    }, '?');
+    helpBtn.addEventListener('mousedown', e => e.preventDefault());
+    helpBtn.addEventListener('click', () => {
+      const show = help.hidden;
+      help.hidden = !show;
+      helpBtn.setAttribute('aria-expanded', show ? 'true' : 'false');
+      helpBtn.classList.toggle('is-open', show);
+    });
+    bar.appendChild(helpBtn);
+
+    ta.addEventListener('input', onEdited);
+
+    root.appendChild(bar);
+    root.appendChild(help);
+    root.appendChild(ta);
+    root.appendChild(counter);
+    root.appendChild(el('div', { class: 'wpf-essay-preview-label' }, t('render.preview')));
+    root.appendChild(preview);
+    updateCounter();
+    refresh();
+    return {
+      getAnswer: () => ta.value,
+      setAnswer: v => { ta.value = v ?? ''; lastValue = ta.value; updateCounter(); refresh(); },
+      isAnswered: () => ta.value.trim() !== '',
+      setDisabled: b => {
+        ta.disabled = b;
+        if (fx) fx.disabled = b;
+        bar.querySelectorAll('.wpf-tool-btn').forEach(x => { x.disabled = b; });
+      }
+    };
+  },
+
+  single(field, root, ctx) {
+    return choiceList(field, root, ctx);
+  },
+
+  truefalse(field, root, ctx) {
+    const labels = field.config.labels || ['Verdadero', 'Falso'];
+    const group = uid();
+    let value = null;
+    const inputs = [];
+    const wrap = el('div', { class: 'wpf-tf' + (field.config.horizontal ? ' wpf-tf--row' : '') });
+    [true, false].forEach((val, i) => {
+      const input = el('input', { type: 'radio', name: group });
+      input.addEventListener('change', () => { value = val; notify(ctx); });
+      inputs.push({ input, val });
+      wrap.appendChild(el('label', { class: 'wpf-choice' }, input, el('span', {}, labels[i])));
+    });
+    root.appendChild(wrap);
+    return {
+      getAnswer: () => value,
+      setAnswer: v => {
+        value = (v === true || v === false) ? v : null;
+        inputs.forEach(o => { o.input.checked = o.val === value; });
+      },
+      isAnswered: () => value !== null,
+      setDisabled: b => inputs.forEach(o => { o.input.disabled = b; })
+    };
+  },
+
+  multi(field, root, ctx) {
+    const options = field.config.options || [];
+    const order = ctx.shuffle ? shuffled(options.map((_, i) => i), ctx.rng) : options.map((_, i) => i);
+    const inputs = [];
+    const wrap = el('div', { class: 'wpf-choices' + (field.config.horizontal ? ' wpf-choices--row' : '') });
+    order.forEach(origIdx => {
+      const input = el('input', { type: 'checkbox' });
+      input.addEventListener('change', () => notify(ctx));
+      inputs.push({ input, origIdx });
+      wrap.appendChild(el('label', { class: 'wpf-choice' }, input, el('span', {}, options[origIdx])));
+    });
+    root.appendChild(wrap);
+    return {
+      getAnswer: () => inputs.filter(o => o.input.checked).map(o => o.origIdx),
+      setAnswer: v => {
+        const set = new Set((Array.isArray(v) ? v : []).map(Number));
+        inputs.forEach(o => { o.input.checked = set.has(o.origIdx); });
+      },
+      isAnswered: () => inputs.some(o => o.input.checked),
+      setDisabled: b => inputs.forEach(o => { o.input.disabled = b; })
+    };
+  },
+
+  checkbox(field, root, ctx) {
+    const cfg = field.config || {};
+    const boxes = cfg.boxes || [];
+    const multiple = Boolean(cfg.multiple);
+    // El root del campo es solo un ancla transparente; las casillas se colocan
+    // libremente sobre la página (igual que las zonas de dragdrop).
+    root.classList.add('wpf-cb-hostfield');
+    const page = root.parentElement;
+
+    let selected = new Set();
+    let disabled = false;
+    const boxEls = new Map();
+
+    function paint() {
+      boxes.forEach(b => {
+        const node = boxEls.get(b.id);
+        if (!node) return;
+        node.classList.toggle('checked', selected.has(b.id));
+        node.setAttribute('aria-checked', String(selected.has(b.id)));
+      });
+    }
+
+    boxes.forEach((b, i) => {
+      const node = el('div', { class: 'wpf-cbbox', dataset: { id: b.id } });
+      // Con teclado: cada casilla entra en el orden de tabulación y se marca
+      // con Intro o Espacio, igual que con el clic.
+      node.setAttribute('tabindex', '0');
+      node.setAttribute('role', multiple ? 'checkbox' : 'radio');
+      node.setAttribute('aria-label', t('render.cbN', { n: i + 1 }));
+      node.addEventListener('keydown', e => {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        e.preventDefault();
+        node.click();
+      });
+      node.style.left   = (b.rect.x * 100) + '%';
+      node.style.top    = (b.rect.y * 100) + '%';
+      node.style.width  = (b.rect.w * 100) + '%';
+      node.style.height = (b.rect.h * 100) + '%';
+      node.innerHTML = CHECKBOX_SVG;
+      node.addEventListener('click', () => {
+        if (disabled) return;
+        if (multiple) {
+          selected.has(b.id) ? selected.delete(b.id) : selected.add(b.id);
+        } else {
+          if (selected.has(b.id)) selected.clear();
+          else selected = new Set([b.id]);
+        }
+        paint();
+        notify(ctx);
+      });
+      page.appendChild(node);
+      boxEls.set(b.id, node);
+    });
+    paint();
+
+    return {
+      getAnswer: () => [...selected],
+      setAnswer: v => {
+        selected = new Set((Array.isArray(v) ? v : []).map(String).filter(id => boxes.some(b => b.id === id)));
+        paint();
+      },
+      isAnswered: () => selected.size > 0,
+      setDisabled: b => {
+        disabled = b;
+        boxEls.forEach(node => {
+          node.setAttribute('tabindex', b ? '-1' : '0');
+          node.setAttribute('aria-disabled', String(b));
+        });
+      },
+      markDetail() {
+        const correct = new Set((cfg.correct || []).map(String));
+        boxes.forEach(b => {
+          const node = boxEls.get(b.id);
+          if (!node) return;
+          const marked = selected.has(b.id);
+          const isCorrect = correct.has(b.id);
+          node.classList.remove('checked');
+          node.classList.toggle('checked', marked);
+          if (marked && isCorrect) node.classList.add('cb-ok');
+          else if (marked && !isCorrect) node.classList.add('cb-ko');
+          else if (!marked && isCorrect) node.classList.add('cb-missing');
+        });
+      }
+    };
+  },
+
+  textboxes(field, root, ctx) {
+    const cfg = field.config || {};
+    const boxes = cfg.boxes || [];
+    // El root es solo un ancla transparente; los cuadros de texto se colocan
+    // libremente sobre la página (igual que las casillas de checkbox). Como
+    // cuelgan de la página y no del root, hay que copiarles a mano los ajustes
+    // de diseño (tamaño de texto, color y fondo) que el root ya lleva en sus vars.
+    root.classList.add('wpf-tb-hostfield');
+    const page = root.parentElement;
+    const fs = root.style.getPropertyValue('--fs');
+    const fg = root.style.getPropertyValue('--field-fg');
+    const bg = root.style.getPropertyValue('--field-bg');
+    const font = root.style.getPropertyValue('--field-font');
+
+    const inputs = new Map();
+    boxes.forEach((b, i) => {
+      const node = el('input', {
+        class: 'wpf-tbbox wpf-input', type: 'text', autocomplete: 'off',
+        dataset: { id: b.id },
+        'aria-label': t('render.gapAria', { n: i + 1 })
+      });
+      if (fs) node.style.setProperty('--fs', fs);
+      if (fg) node.style.setProperty('--field-fg', fg);
+      if (bg) node.style.setProperty('--field-bg', bg);
+      if (font) node.style.setProperty('--field-font', font);
+      node.style.left   = (b.rect.x * 100) + '%';
+      node.style.top    = (b.rect.y * 100) + '%';
+      node.style.width  = (b.rect.w * 100) + '%';
+      node.style.height = (b.rect.h * 100) + '%';
+      node.addEventListener('input', () => notify(ctx));
+      page.appendChild(node);
+      inputs.set(b.id, node);
+    });
+
+    return {
+      getAnswer: () => {
+        const o = {};
+        inputs.forEach((inp, id) => { o[id] = inp.value; });
+        return o;
+      },
+      setAnswer: v => {
+        const obj = v && typeof v === 'object' ? v : {};
+        inputs.forEach((inp, id) => { inp.value = obj[id] ?? ''; });
+      },
+      isAnswered: () => [...inputs.values()].some(inp => inp.value.trim() !== ''),
+      setDisabled: b => inputs.forEach(inp => { inp.disabled = b; }),
+      markDetail() {
+        const norm = s => normalizeText(s, cfg);
+        page.querySelectorAll(`.wpf-tb-exp[data-f="${field.id}"]`).forEach(n => n.remove());
+        boxes.forEach(b => {
+          const inp = inputs.get(b.id);
+          if (!inp) return;
+          const v = inp.value;
+          const answers = (b.answers || []).filter(a => a.trim() !== '');
+          const ok = v.trim() !== '' && answers.some(a => norm(a) === norm(v));
+          inp.classList.remove('tb-ok', 'tb-ko');
+          inp.classList.add(ok ? 'tb-ok' : 'tb-ko');
+          if (!ok && answers.length) {
+            const exp = el('div', { class: 'wpf-tb-exp', dataset: { f: field.id } }, answers[0]);
+            exp.style.left = (b.rect.x * 100) + '%';
+            exp.style.top  = ((b.rect.y + b.rect.h) * 100) + '%';
+            exp.style.minWidth = (b.rect.w * 100) + '%';
+            page.appendChild(exp);
+          }
+        });
+      }
+    };
+  },
+
+  select(field, root, ctx) {
+    const options = field.config.options || [];
+    const order = ctx.shuffle ? shuffled(options.map((_, i) => i), ctx.rng) : options.map((_, i) => i);
+    const sel = buildRichSelect({
+      options: order.map(origIdx => ({ value: String(origIdx), label: options[origIdx] })),
+      ariaLabel: t('render.selectAria'),
+      className: 'wpf-richselect-standalone',
+      placeholder: '—'
+    });
+    sel.addEventListener('change', () => notify(ctx));
+    root.appendChild(sel);
+    return {
+      getAnswer: () => sel.value === '' ? null : Number(sel.value),
+      setAnswer: v => { sel.value = (v === null || v === undefined) ? '' : String(v); },
+      isAnswered: () => sel.value !== '',
+      setDisabled: b => { sel.disabled = b; }
+    };
+  },
+
+  table(field, root, ctx) {
+    const { cfg, table, inputs } = buildTable(field, ctx);
+    root.appendChild(el('div', { class: 'wpf-table-wrap' }, table));
+    return {
+      getAnswer: () => {
+        const out = Array.from({ length: cfg.rows }, () => Array.from({ length: cfg.cols }, () => ''));
+        inputs.forEach(({ r, c, input }) => { out[r][c] = input.value; });
+        return out;
+      },
+      setAnswer: v => {
+        const rows = Array.isArray(v) ? v : [];
+        inputs.forEach(({ r, c, input }) => { input.value = rows?.[r]?.[c] ?? ''; });
+      },
+      isAnswered: () => inputs.some(({ input }) => input.value.trim() !== ''),
+      setDisabled: b => inputs.forEach(({ input }) => { input.disabled = b; }),
+      markDetail() {
+        const helpers = { normalizeText, parseDecimal };
+        inputs.forEach(({ r, c, input }) => {
+          input.classList.remove('tb-ok', 'tb-ko');
+          if (cfg.examples?.[r]?.[c]) return;
+          const res = tableCellMatches(cfg, r, c, input.value, helpers);
+          if (res === null) return; // celda sin respuesta esperada
+          input.classList.add(res === true ? 'tb-ok' : 'tb-ko');
+        });
+      }
+    };
+  },
+
+  gaps(field, root, ctx) {
+    const segments = parseGaps(field.config.text || '');
+    const inputs = [];
+    const wrap = el('div', { class: 'wpf-gaps' });
+    segments.forEach(seg => {
+      if (seg.kind === 'text') {
+        wrap.appendChild(document.createTextNode(seg.value));
+      } else {
+        // Ancho proporcional a la respuesta más larga del hueco
+        const len = Math.max(...seg.answers.map(a => a.length), 1);
+        const ch = Math.max(4, Math.min(28, len + 2));
+        const input = el('input', {
+          class: 'wpf-gap-input', type: 'text', autocomplete: 'off',
+          style: 'width:' + ch + 'ch',
+          'aria-label': t('render.gapAria', { n: inputs.length + 1 })
+        });
+        input.addEventListener('input', () => notify(ctx));
+        inputs.push(input);
+        wrap.appendChild(input);
+      }
+    });
+    root.appendChild(wrap);
+    return {
+      getAnswer: () => inputs.map(i => i.value),
+      setAnswer: v => {
+        const arr = Array.isArray(v) ? v : [];
+        inputs.forEach((inp, i) => { inp.value = arr[i] ?? ''; });
+      },
+      isAnswered: () => inputs.some(i => i.value.trim() !== ''),
+      setDisabled: b => inputs.forEach(i => { i.disabled = b; })
+    };
+  },
+
+  match(field, root, ctx) {
+    const pairs = field.config.pairs || [];
+    const rights = pairs.map(p => p.right).concat(field.config.distractors || []);
+    // El orden de las opciones de la derecha se baraja siempre.
+    const order = shuffledIndices(rights.length, ctx.rng);
+    const selects = [];
+    const wrap = el('div', { class: 'wpf-match' });
+    pairs.forEach((pair, i) => {
+      const sel = el('select', { class: 'wpf-select', 'aria-label': t('render.matchAria', { left: pair.left }) },
+        el('option', { value: '' }, '—'));
+      order.forEach(ri => {
+        sel.appendChild(el('option', { value: String(ri) }, rights[ri]));
+      });
+      sel.addEventListener('change', () => notify(ctx));
+      selects.push(sel);
+      wrap.appendChild(el('div', { class: 'wpf-match-row' },
+        el('span', { class: 'wpf-match-left' }, pair.left), sel));
+    });
+    root.appendChild(wrap);
+    return {
+      getAnswer: () => selects.map(s => s.value === '' ? null : Number(s.value)),
+      setAnswer: v => {
+        const arr = Array.isArray(v) ? v : [];
+        selects.forEach((s, i) => {
+          s.value = (arr[i] === null || arr[i] === undefined) ? '' : String(arr[i]);
+        });
+      },
+      isAnswered: () => selects.some(s => s.value !== ''),
+      setDisabled: b => selects.forEach(s => { s.disabled = b; })
+    };
+  },
+
+  order(field, root, ctx) {
+    const items = field.config.items || [];
+    // arrangement[pos] = índice original mostrado en esa posición. Se baraja siempre.
+    let arrangement = shuffledIndices(items.length, ctx.rng);
+    let disabled = false;
+    let touched = false;
+    let dragPos = null;
+    const list = el('div', { class: 'wpf-order' + (field.config.horizontal ? ' wpf-order--row' : '') });
+    root.appendChild(list);
+
+    function move(pos, delta) {
+      const j = pos + delta;
+      if (j < 0 || j >= arrangement.length) return;
+      [arrangement[pos], arrangement[j]] = [arrangement[j], arrangement[pos]];
+      touched = true;
+      paint();
+      notify(ctx);
+    }
+
+    function moveTo(from, to) {
+      if (from === to || from < 0 || to < 0 || from >= arrangement.length || to >= arrangement.length) return;
+      const next = arrangement.slice();
+      const [moved] = next.splice(from, 1);
+      next.splice(to, 0, moved);
+      arrangement = next;
+      touched = true;
+      paint();
+      notify(ctx);
+    }
+
+    function paint() {
+      list.textContent = '';
+      arrangement.forEach((orig, pos) => {
+        const item = el('div', { class: 'wpf-order-item', draggable: disabled ? null : 'true' });
+        const horiz = Boolean(field.config.horizontal);
+        const up = el('button', { class: 'wpf-mini-btn', type: 'button', 'aria-label': t(horiz ? 'render.moveLeft' : 'render.moveUp') }, horiz ? '◀' : '▲');
+        const down = el('button', { class: 'wpf-mini-btn', type: 'button', 'aria-label': t(horiz ? 'render.moveRight' : 'render.moveDown') }, horiz ? '▶' : '▼');
+        up.disabled = disabled || pos === 0;
+        down.disabled = disabled || pos === arrangement.length - 1;
+        up.addEventListener('click', () => move(pos, -1));
+        down.addEventListener('click', () => move(pos, 1));
+        item.addEventListener('dragstart', e => {
+          if (disabled) return;
+          dragPos = pos;
+          item.classList.add('dragging');
+          e.dataTransfer.effectAllowed = 'move';
+          e.dataTransfer.setData('text/plain', String(pos));
+        });
+        item.addEventListener('dragend', () => {
+          dragPos = null;
+          item.classList.remove('dragging');
+          list.querySelectorAll('.drag-over').forEach(n => n.classList.remove('drag-over'));
+        });
+        item.addEventListener('dragover', e => {
+          if (disabled || dragPos === null || dragPos === pos) return;
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'move';
+          item.classList.add('drag-over');
+        });
+        item.addEventListener('dragleave', e => {
+          if (!item.contains(e.relatedTarget)) item.classList.remove('drag-over');
+        });
+        item.addEventListener('drop', e => {
+          e.preventDefault();
+          item.classList.remove('drag-over');
+          if (disabled || dragPos === null) return;
+          moveTo(dragPos, pos);
+          dragPos = null;
+        });
+        item.append(
+          el('span', { class: 'wpf-order-num' }, String(pos + 1)),
+          el('span', { class: 'wpf-order-text' }, items[orig]),
+          el('span', { class: 'wpf-order-btns' }, up, down));
+        list.appendChild(item);
+      });
+    }
+    paint();
+
+    return {
+      getAnswer: () => arrangement.slice(),
+      setAnswer: v => {
+        if (Array.isArray(v) && v.length === items.length) {
+          arrangement = v.map(Number);
+          touched = true;
+        }
+        paint();
+      },
+      isAnswered: () => touched,
+      setDisabled: b => { disabled = b; paint(); }
+    };
+  },
+
+  dragdrop(field, root, ctx) {
+    const cfg = field.config;
+    const zones = cfg.zones || [];
+    const crops = cfg.mode === 'crops';
+    const pieces = crops ? (cfg.pieces || []) : [];
+    const pieceMap = {};
+    pieces.forEach(p => { pieceMap[p.id] = p; });
+
+    const zoneAnswers = z => Array.isArray(z.answers) && z.answers.length
+      ? z.answers.map(String) : z.answer ? [String(z.answer)] : [];
+
+    // Tokens arrastrables: ids de pieza (modo recorte) o etiquetas (modo clásico).
+    const tokens = crops
+      ? pieces.map(p => p.id)
+      : zones.flatMap(zoneAnswers).concat(cfg.distractors || []);
+    const tokenOrder = shuffledIndices(tokens.length, ctx.rng);
+
+    function tokenImgUrl(label) {
+      if (crops) {
+        const p = pieceMap[label];
+        return p && ctx.fileUrl ? (ctx.fileUrl(p.src) || null) : null;
+      }
+      if (!label.startsWith('dtokens/') || !ctx.fileUrl) return null;
+      return ctx.fileUrl(label) || null;
+    }
+    function tokenContent(label) {
+      const url = tokenImgUrl(label);
+      if (url) {
+        const img = document.createElement('img');
+        // Un recorte del documento no tiene texto propio: se nombra por su
+        // posición en el orden barajado, que no delata la respuesta.
+        img.src = url; img.className = 'wpf-token-img';
+        img.alt = crops ? t('render.cropPiece', { n: tokenOrder.indexOf(tokens.indexOf(label)) + 1 }) : label;
+        return img;
+      }
+      return document.createTextNode(label);
+    }
+    function hasImg(label) { return Boolean(tokenImgUrl(label)); }
+
+    // Tokens correctos para una zona (por nombre en modo clásico, por pieza
+    // asignada en modo recorte).
+    function correctTokens(z) {
+      return crops
+        ? pieces.filter(p => p.zoneId === z.id).map(p => p.id)
+        : zoneAnswers(z);
+    }
+
+    // assignment: zoneId → string[]
+    const assignment = {};
+    zones.forEach(z => { assignment[z.id] = []; });
+    let selectedToken = null;
+    let dragToken = null;
+    let disabled = false;
+
+    // Devuelve un token a su origen eliminándolo de donde esté.
+    function releaseToken(tk) {
+      for (const id of Object.keys(assignment)) {
+        assignment[id] = assignment[id].filter(t => t !== tk);
+      }
+    }
+
+    // Coloca un token en una zona.
+    function placeToken(tk, zoneId) {
+      releaseToken(tk);
+      assignment[zoneId] = [...assignment[zoneId], tk];
+    }
+
+    function usedTokens() {
+      return new Set(Object.values(assignment).flat());
+    }
+
+    // --- Zona de partida: bandeja (clásico) o huecos sobre la página (recorte) ---
+    let trayBox = null;
+    const homeEls = {};
+    if (crops) {
+      root.classList.add('wpf-crops-host');
+      pieces.forEach(p => {
+        const hEl = el('div', { class: 'wpf-hole', dataset: { piece: p.id } });
+        positionRect(hEl, p.rect);
+        hEl.style.setProperty('--fs', field.fontScale || 1);
+        hEl.style.setProperty('--field-bg', cfg.holeColor || '#ffffff');
+        // Soltar cualquier pieza sobre un hueco la devuelve a su origen.
+        hEl.addEventListener('dragover', e => {
+          if (disabled || !dragToken) return;
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'move';
+          hEl.classList.add('drag-over');
+        });
+        hEl.addEventListener('dragleave', e => {
+          if (!hEl.contains(e.relatedTarget)) hEl.classList.remove('drag-over');
+        });
+        hEl.addEventListener('drop', e => {
+          e.preventDefault();
+          hEl.classList.remove('drag-over');
+          if (disabled || !dragToken) return;
+          releaseToken(dragToken);
+          dragToken = null; selectedToken = null;
+          paint(); notify(ctx);
+        });
+        hEl.addEventListener('click', () => {
+          if (disabled || selectedToken === null) return;
+          releaseToken(selectedToken);
+          selectedToken = null;
+          paint(); notify(ctx);
+        });
+        root.parentElement.appendChild(hEl);
+        homeEls[p.id] = hEl;
+      });
+    } else {
+      root.classList.add('wpf-tray');
+      trayBox = el('div', { class: 'wpf-tray-tokens' });
+      root.appendChild(trayBox);
+      // Permite soltar un token en la bandeja para devolverlo.
+      trayBox.addEventListener('dragover', e => { if (!disabled && dragToken) e.preventDefault(); });
+      trayBox.addEventListener('drop', e => {
+        e.preventDefault();
+        if (disabled || !dragToken) return;
+        releaseToken(dragToken);
+        dragToken = null; selectedToken = null;
+        paint(); notify(ctx);
+      });
+    }
+
+    // Las zonas de destino se colocan directamente sobre la página.
+    const zoneEls = {};
+    zones.forEach((z, zi) => {
+      const zEl = el('div', { class: 'wpf-zone', dataset: { zone: z.id } });
+      positionRect(zEl, z.rect);
+      zEl.style.setProperty('--fs', field.fontScale || 1);
+
+      // Con teclado: se elige la pieza con Intro, se llega a la zona con el
+      // tabulador y se suelta con Intro o Espacio (lo mismo que el clic).
+      zEl.setAttribute('tabindex', '0');
+      zEl.setAttribute('role', 'button');
+      zEl.setAttribute('aria-label', t('render.dropZoneN', { n: zi + 1 }));
+      zEl.addEventListener('keydown', e => {
+        if (e.target !== zEl || (e.key !== 'Enter' && e.key !== ' ')) return;
+        e.preventDefault();
+        zEl.click();
+      });
+
+      // Clic: coloca el token seleccionado por clic.
+      zEl.addEventListener('click', () => {
+        if (disabled || selectedToken === null) return;
+        placeToken(selectedToken, z.id);
+        selectedToken = null;
+        paint(); notify(ctx);
+      });
+
+      // Drag-and-drop sobre zona.
+      zEl.addEventListener('dragover', e => {
+        if (disabled || !dragToken) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        zEl.classList.add('drag-over');
+      });
+      zEl.addEventListener('dragleave', e => {
+        if (!zEl.contains(e.relatedTarget)) zEl.classList.remove('drag-over');
+      });
+      zEl.addEventListener('drop', e => {
+        e.preventDefault();
+        zEl.classList.remove('drag-over');
+        if (disabled || !dragToken) return;
+        placeToken(dragToken, z.id);
+        dragToken = null; selectedToken = null;
+        paint(); notify(ctx);
+      });
+
+      root.parentElement.appendChild(zEl);
+      zoneEls[z.id] = zEl;
+    });
+
+    // Añade los manejadores de arrastre comunes a un chip/botón de token.
+    function wireDrag(btn, tk) {
+      btn.addEventListener('dragstart', e => {
+        e.stopPropagation();
+        dragToken = tk; selectedToken = null;
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', tk);
+        // Imagen de arrastre explícita: con la imagen del hueco a tamaño
+        // completo (y dimensiones en %), el "fantasma" por defecto no se
+        // genera bien en el primer arrastre. Fijarla lo soluciona.
+        const im = btn.querySelector('img');
+        if (im) {
+          const w = im.clientWidth || im.naturalWidth || 1;
+          const h = im.clientHeight || im.naturalHeight || 1;
+          try { e.dataTransfer.setDragImage(im, w / 2, h / 2); } catch (_) {}
+        }
+        requestAnimationFrame(() => btn.classList.add('dragging'));
+      });
+      btn.addEventListener('dragend', () => {
+        dragToken = null;
+        btn.classList.remove('dragging');
+        paint();
+      });
+    }
+
+    function makeTokenBtn(tk, opts = {}) {
+      const cls = 'wpf-token' + (hasImg(tk) ? ' has-img' : '');
+      const btn = el('button', { class: cls, type: 'button', draggable: 'true', title: tk, dataset: { label: tk } });
+      btn.appendChild(tokenContent(tk));
+      if (opts.selected) btn.classList.add('selected');
+      btn.disabled = disabled;
+      btn.setAttribute('aria-pressed', String(Boolean(opts.selected)));
+      btn.addEventListener('click', () => {
+        if (disabled) return;
+        selectedToken = selectedToken === tk ? null : tk;
+        paint();
+        refocusToken(tk);
+      });
+      wireDrag(btn, tk);
+      return btn;
+    }
+
+    // paint() rehace los botones de las piezas: tras elegir una, el foco del
+    // teclado vuelve a esa pieza en vez de perderse.
+    function refocusToken(tk) {
+      const sel = '.wpf-token, .wpf-hole-piece';
+      const scope = root.parentElement || root;
+      const again = [...scope.querySelectorAll(sel)].find(b => b.dataset.label === tk);
+      if (again) again.focus();
+    }
+
+    // Pieza descansando en su hueco de origen (modo recorte).
+    function makeHomeChip(tk) {
+      const btn = el('button', { class: 'wpf-hole-piece', type: 'button', draggable: 'true', dataset: { label: tk } });
+      btn.appendChild(tokenContent(tk));
+      if (selectedToken === tk) btn.classList.add('selected');
+      btn.setAttribute('aria-pressed', String(selectedToken === tk));
+      btn.disabled = disabled;
+      btn.addEventListener('click', e => {
+        e.stopPropagation();
+        if (disabled) return;
+        selectedToken = selectedToken === tk ? null : tk;
+        paint();
+        refocusToken(tk);
+      });
+      wireDrag(btn, tk);
+      return btn;
+    }
+
+    function paint() {
+      const used = usedTokens();
+      if (trayBox) {
+        trayBox.textContent = '';
+        tokenOrder.forEach(ti => {
+          const tk = tokens[ti];
+          if (used.has(tk)) return;
+          trayBox.appendChild(makeTokenBtn(tk, { selected: selectedToken === tk }));
+        });
+      }
+      if (crops) {
+        pieces.forEach(p => {
+          const hEl = homeEls[p.id];
+          hEl.textContent = '';
+          const atHome = !used.has(p.id);
+          hEl.classList.toggle('empty', !atHome);
+          hEl.classList.toggle('armed', !atHome && selectedToken !== null);
+          if (atHome) hEl.appendChild(makeHomeChip(p.id));
+        });
+      }
+
+      zones.forEach(z => {
+        const zEl = zoneEls[z.id];
+        zEl.textContent = '';
+        assignment[z.id].forEach(tk => {
+          const chipCls = 'wpf-zone-chip' + (hasImg(tk) ? ' has-img' : '');
+          const chip = el('button', { class: chipCls, type: 'button', draggable: 'true', title: crops ? '' : tk, dataset: { label: tk } });
+          chip.appendChild(tokenContent(tk));
+          chip.disabled = disabled;
+
+          chip.addEventListener('click', e => {
+            e.stopPropagation();
+            if (disabled) return;
+            releaseToken(tk);
+            if (selectedToken === tk) selectedToken = null;
+            paint(); notify(ctx);
+          });
+          wireDrag(chip, tk);
+          zEl.appendChild(chip);
+        });
+        zEl.classList.toggle('filled', assignment[z.id].length > 0);
+        zEl.classList.toggle('armed', selectedToken !== null);
+      });
+    }
+    paint();
+
+    return {
+      getAnswer: () => {
+        const out = {};
+        zones.forEach(z => { out[z.id] = [...assignment[z.id]]; });
+        return out;
+      },
+      setAnswer: v => {
+        const obj = v && typeof v === 'object' ? v : {};
+        zones.forEach(z => {
+          const val = obj[z.id];
+          assignment[z.id] = Array.isArray(val) ? [...val] : (val ? [String(val)] : []);
+        });
+        selectedToken = null;
+        paint();
+      },
+      isAnswered: () => Object.values(assignment).some(arr => arr.length > 0),
+      setDisabled: b => {
+        disabled = b; selectedToken = null; paint();
+        Object.values(zoneEls).forEach(zEl => {
+          zEl.setAttribute('tabindex', b ? '-1' : '0');
+          zEl.setAttribute('aria-disabled', String(b));
+        });
+      },
+      markDetail() {
+        zones.forEach(z => {
+          const correct = correctTokens(z);
+          const zEl = zoneEls[z.id];
+          zEl.querySelectorAll('.wpf-zone-chip').forEach(chip => {
+            chip.classList.add(correct.includes(chip.dataset.label) ? 'mark-ok' : 'mark-ko');
+          });
+          if (!assignment[z.id].length && correct.length) zEl.classList.add('mark-ko');
+        });
+        if (crops) {
+          const used = usedTokens();
+          // Pieza que debía colocarse y sigue en su hueco: incompleta.
+          pieces.forEach(p => {
+            if (p.zoneId && !used.has(p.id)) homeEls[p.id]?.classList.add('mark-ko');
+          });
+        }
+      }
+    };
+  },
+
+  arrowmatch(field, root, ctx) {
+    const cfg = field.config || {};
+    const allItems = cfg.items || [];
+    const leftItems = allItems.filter(i => i.side === 'left');
+    const rightItems = allItems.filter(i => i.side === 'right');
+    const svgNS = 'http://www.w3.org/2000/svg';
+
+    // Modo hotspot: al menos un item tiene rect definido en coords de página.
+    const hotspotMode = allItems.some(i => i.rect);
+
+    let connections = []; // [{from, to}]
+    let pendingFrom = null;
+    let disabled = false;
+
+    // Contenedor SVG y referencia al elemento de medición para el redraw.
+    let svg, svgContainer, dotMap;
+
+    if (hotspotMode) {
+      // El root del campo se hace transparente; los items y el SVG van en la página.
+      root.classList.add('wpf-am-hotspot-field');
+      const page = root.parentElement;
+
+      svg = document.createElementNS(svgNS, 'svg');
+      svg.setAttribute('class', 'wpf-am-svg wpf-am-svg-page');
+      page.appendChild(svg);
+      svgContainer = page;
+
+      dotMap = new Map();
+
+      // Origen del área de contenido de la página: el SVG se coloca dentro
+      // del borde, así que las coordenadas deben excluirlo.
+      function contentOrigin() {
+        const pr = svgContainer.getBoundingClientRect();
+        const cs = getComputedStyle(svgContainer);
+        return {
+          left: pr.left + (parseFloat(cs.borderLeftWidth) || 0),
+          top: pr.top + (parseFloat(cs.borderTopWidth) || 0)
+        };
+      }
+
+      function dotCenter(id) {
+        const dot = dotMap.get(id);
+        if (!dot) return null;
+        const o = contentOrigin();
+        const dr = dot.getBoundingClientRect();
+        if (!svgContainer.clientWidth) return null;
+        return { x: dr.left + dr.width / 2 - o.left, y: dr.top + dr.height / 2 - o.top };
+      }
+
+      function redraw() {
+        svg.setAttribute('width', svgContainer.clientWidth || 0);
+        svg.setAttribute('height', svgContainer.clientHeight || 0);
+        svg.textContent = '';
+        function drawLine(fromId, toId, extraClass) {
+          const f = dotCenter(fromId), t2 = dotCenter(toId);
+          if (!f || !t2) return;
+          const cx = (f.x + t2.x) / 2;
+          const d = `M${f.x},${f.y} C${cx},${f.y} ${cx},${t2.y} ${t2.x},${t2.y}`;
+          const vis = document.createElementNS(svgNS, 'path');
+          vis.setAttribute('d', d);
+          vis.setAttribute('class', 'wpf-am-line' + (extraClass ? ' ' + extraClass : ''));
+          vis.setAttribute('data-from', fromId);
+          vis.setAttribute('data-to', toId);
+          svg.appendChild(vis);
+          const hit = document.createElementNS(svgNS, 'path');
+          hit.setAttribute('d', d);
+          hit.setAttribute('class', 'wpf-am-hit');
+          hit.setAttribute('pointer-events', 'stroke');
+          hit.addEventListener('click', e => {
+            if (disabled) return;
+            e.stopPropagation();
+            connections = connections.filter(c => !(c.from === fromId && c.to === toId));
+            pendingFrom = null;
+            updateDots(); redraw(); notify(ctx);
+          });
+          svg.appendChild(hit);
+        }
+        connections.forEach(c => drawLine(c.from, c.to, ''));
+      }
+
+      function updateDots() {
+        dotMap.forEach((dot, id) => {
+          dot.classList.toggle('am-dot-active', id === pendingFrom);
+          dot.classList.toggle('am-dot-connected',
+            connections.some(c => c.from === id || c.to === id));
+          dot.closest('[tabindex]')?.setAttribute('aria-pressed', String(id === pendingFrom));
+        });
+      }
+
+      function handleHotspotClick(item) {
+        if (disabled) return;
+        if (item.side === 'left') {
+          if (pendingFrom === item.id) {
+            pendingFrom = null;
+          } else {
+            connections = connections.filter(c => c.from !== item.id);
+            pendingFrom = item.id;
+          }
+          updateDots(); redraw();
+        } else {
+          if (!pendingFrom) return;
+          connections = connections.filter(c => c.to !== item.id);
+          connections.push({ from: pendingFrom, to: item.id });
+          pendingFrom = null;
+          updateDots(); redraw(); notify(ctx);
+        }
+      }
+
+      // Crear overlays de hotspot para cada item con rect.
+      allItems.forEach(item => {
+        if (!item.rect) return;
+        const hs = el('div', { class: `wpf-am-hotspot wpf-am-hs-${item.side}`, dataset: { id: item.id } });
+        // Usar height exacto (no minHeight) para que el dot quede siempre centrado.
+        hs.style.left   = (item.rect.x * 100) + '%';
+        hs.style.top    = (item.rect.y * 100) + '%';
+        hs.style.width  = (item.rect.w * 100) + '%';
+        hs.style.height = (item.rect.h * 100) + '%';
+        // Dot en el borde: derecho para izquierda, izquierdo para derecha.
+        const dot = el('div', { class: 'wpf-am-dot' });
+        hs.appendChild(dot);
+        dotMap.set(item.id, dot);
+        hs.addEventListener('click', e => { e.stopPropagation(); handleHotspotClick(item); });
+        amKeyboard(hs, item, (item.side === 'left' ? leftItems : rightItems).indexOf(item),
+          () => handleHotspotClick(item));
+        page.appendChild(hs);
+      });
+
+      const ro = new ResizeObserver(redraw);
+      ro.observe(svgContainer);
+      requestAnimationFrame(redraw);
+
+      return {
+        getAnswer: () => connections.slice(),
+        setAnswer: v => {
+          connections = Array.isArray(v) ? v.filter(c => c.from && c.to) : [];
+          updateDots(); requestAnimationFrame(redraw);
+        },
+        isAnswered: () => connections.length > 0,
+        setDisabled: b => { disabled = b; },
+        markDetail() {
+          svg.querySelectorAll('.wpf-am-line').forEach(line => {
+            const from = line.getAttribute('data-from');
+            const to   = line.getAttribute('data-to');
+            const ok   = (cfg.pairs || []).some(p => p.from === from && p.to === to);
+            line.classList.add(ok ? 'am-line-ok' : 'am-line-ko');
+          });
+          (cfg.pairs || []).forEach(pair => {
+            if (connections.some(c => c.from === pair.from && c.to === pair.to)) return;
+            const f = dotCenter(pair.from), t2 = dotCenter(pair.to);
+            if (!f || !t2) return;
+            const cx = (f.x + t2.x) / 2;
+            const miss = document.createElementNS(svgNS, 'path');
+            miss.setAttribute('d', `M${f.x},${f.y} C${cx},${f.y} ${cx},${t2.y} ${t2.x},${t2.y}`);
+            miss.setAttribute('class', 'wpf-am-line am-line-missing');
+            svg.insertBefore(miss, svg.firstChild);
+          });
+        }
+      };
+    }
+
+    // ── Modo columnas (comportamiento original) ───────────────────────────────
+
+    const wrap = el('div', { class: 'wpf-arrowmatch' });
+    root.appendChild(wrap);
+
+    const leftCol  = el('div', { class: 'wpf-am-col wpf-am-left-col'  });
+    const rightCol = el('div', { class: 'wpf-am-col wpf-am-right-col' });
+    wrap.appendChild(leftCol);
+    wrap.appendChild(el('div', { class: 'wpf-am-gap' }));
+    wrap.appendChild(rightCol);
+
+    svg = document.createElementNS(svgNS, 'svg');
+    svg.setAttribute('class', 'wpf-am-svg');
+    wrap.appendChild(svg);
+    svgContainer = wrap;
+
+    dotMap = new Map();
+
+    function dotCenter(id) {
+      const dot = dotMap.get(id);
+      if (!dot) return null;
+      const wr = svgContainer.getBoundingClientRect();
+      const dr = dot.getBoundingClientRect();
+      if (!wr.width) return null;
+      return { x: dr.left + dr.width / 2 - wr.left, y: dr.top + dr.height / 2 - wr.top };
+    }
+
+    function redraw() {
+      const wr = svgContainer.getBoundingClientRect();
+      svg.setAttribute('width', wr.width || 0);
+      svg.setAttribute('height', wr.height || 0);
+      svg.textContent = '';
+
+      function drawLine(fromId, toId, extraClass) {
+        const f = dotCenter(fromId), t2 = dotCenter(toId);
+        if (!f || !t2) return;
+        const cx = (f.x + t2.x) / 2;
+        const d = `M${f.x},${f.y} C${cx},${f.y} ${cx},${t2.y} ${t2.x},${t2.y}`;
+        const vis = document.createElementNS(svgNS, 'path');
+        vis.setAttribute('d', d);
+        vis.setAttribute('class', 'wpf-am-line' + (extraClass ? ' ' + extraClass : ''));
+        vis.setAttribute('data-from', fromId);
+        vis.setAttribute('data-to', toId);
+        svg.appendChild(vis);
+        const hit = document.createElementNS(svgNS, 'path');
+        hit.setAttribute('d', d);
+        hit.setAttribute('class', 'wpf-am-hit');
+        hit.setAttribute('pointer-events', 'stroke');
+        hit.addEventListener('click', e => {
+          if (disabled) return;
+          e.stopPropagation();
+          connections = connections.filter(c => !(c.from === fromId && c.to === toId));
+          pendingFrom = null;
+          wrap.classList.remove('am-pending');
+          updateDots(); redraw(); notify(ctx);
+        });
+        svg.appendChild(hit);
+      }
+
+      connections.forEach(c => drawLine(c.from, c.to, ''));
+    }
+
+    function updateDots() {
+      dotMap.forEach((dot, id) => {
+        dot.classList.toggle('am-dot-active', id === pendingFrom);
+        dot.classList.toggle('am-dot-connected',
+          connections.some(c => c.from === id || c.to === id));
+        dot.closest('[tabindex]')?.setAttribute('aria-pressed', String(id === pendingFrom));
+      });
+    }
+
+    function handleDotClick(item) {
+      if (disabled) return;
+      if (item.side === 'left') {
+        if (pendingFrom === item.id) {
+          pendingFrom = null; wrap.classList.remove('am-pending');
+        } else {
+          connections = connections.filter(c => c.from !== item.id);
+          pendingFrom = item.id; wrap.classList.add('am-pending');
+        }
+        updateDots(); redraw();
+      } else {
+        if (!pendingFrom) return;
+        connections = connections.filter(c => c.to !== item.id);
+        connections.push({ from: pendingFrom, to: item.id });
+        pendingFrom = null; wrap.classList.remove('am-pending');
+        updateDots(); redraw(); notify(ctx);
+      }
+    }
+
+    function makeItem(item) {
+      const div = el('div', { class: 'wpf-am-item' });
+      const content = el('div', { class: 'wpf-am-content' });
+      if (item.src && ctx.fileUrl) {
+        content.appendChild(el('img', { src: ctx.fileUrl(item.src), class: 'wpf-am-img', alt: item.label || '' }));
+      } else {
+        content.appendChild(el('span', { class: 'wpf-am-text' }, item.label || ''));
+      }
+      div.appendChild(content);
+      const dot = el('div', { class: 'wpf-am-dot' });
+      div.appendChild(dot);
+      dotMap.set(item.id, dot);
+      dot.addEventListener('click', e => { e.stopPropagation(); handleDotClick(item); });
+      amKeyboard(dot, item, (item.side === 'left' ? leftItems : rightItems).indexOf(item),
+        () => handleDotClick(item));
+      return div;
+    }
+
+    if (!leftItems.length && !rightItems.length) {
+      wrap.appendChild(el('p', { class: 'wpf-am-empty' }, t('render.amEmpty')));
+    }
+    leftItems.forEach(item => leftCol.appendChild(makeItem(item)));
+    rightItems.forEach(item => rightCol.appendChild(makeItem(item)));
+
+    const ro = new ResizeObserver(redraw);
+    ro.observe(wrap);
+    requestAnimationFrame(redraw);
+
+    return {
+      getAnswer: () => connections.slice(),
+      setAnswer: v => {
+        connections = Array.isArray(v) ? v.filter(c => c.from && c.to) : [];
+        updateDots(); requestAnimationFrame(redraw);
+      },
+      isAnswered: () => connections.length > 0,
+      setDisabled: b => { disabled = b; wrap.classList.toggle('am-disabled', b); },
+      markDetail() {
+        svg.querySelectorAll('.wpf-am-line').forEach(line => {
+          const from = line.getAttribute('data-from');
+          const to   = line.getAttribute('data-to');
+          const ok   = (cfg.pairs || []).some(p => p.from === from && p.to === to);
+          line.classList.add(ok ? 'am-line-ok' : 'am-line-ko');
+        });
+        (cfg.pairs || []).forEach(pair => {
+          if (connections.some(c => c.from === pair.from && c.to === pair.to)) return;
+          const f = dotCenter(pair.from), t2 = dotCenter(pair.to);
+          if (!f || !t2) return;
+          const cx = (f.x + t2.x) / 2;
+          const miss = document.createElementNS(svgNS, 'path');
+          miss.setAttribute('d', `M${f.x},${f.y} C${cx},${f.y} ${cx},${t2.y} ${t2.x},${t2.y}`);
+          miss.setAttribute('class', 'wpf-am-line am-line-missing');
+          svg.insertBefore(miss, svg.firstChild);
+        });
+      }
+    };
+  }
+};
+
+// «Unir con flechas» también se maneja con el teclado: cada elemento entra en
+// el orden de tabulación e Intro o Espacio hacen lo mismo que el clic.
+function amKeyboard(node, item, index, onActivate) {
+  node.setAttribute('tabindex', '0');
+  node.setAttribute('role', 'button');
+  node.setAttribute('aria-label', item.label ||
+    t(item.side === 'left' ? 'render.amLeftN' : 'render.amRightN', { n: index + 1 }));
+  node.addEventListener('keydown', e => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    e.preventDefault();
+    e.stopPropagation();
+    onActivate();
+  });
+}
+
+// Opción única: radios con barajado opcional.
+function choiceList(field, root, ctx) {
+  const options = field.config.options || [];
+  const order = ctx.shuffle ? shuffled(options.map((_, i) => i), ctx.rng) : options.map((_, i) => i);
+  const group = uid();
+  let value = null;
+  const inputs = [];
+  const wrap = el('div', { class: 'wpf-choices' + (field.config.horizontal ? ' wpf-choices--row' : '') });
+  order.forEach(origIdx => {
+    const input = el('input', { type: 'radio', name: group });
+    input.addEventListener('change', () => { value = origIdx; notify(ctx); });
+    inputs.push({ input, origIdx });
+    wrap.appendChild(el('label', { class: 'wpf-choice' }, input, el('span', {}, options[origIdx])));
+  });
+  root.appendChild(wrap);
+  return {
+    getAnswer: () => value,
+    setAnswer: v => {
+      value = (v === null || v === undefined) ? null : Number(v);
+      inputs.forEach(o => { o.input.checked = o.origIdx === value; });
+    },
+    isAnswered: () => value !== null,
+    setDisabled: b => inputs.forEach(o => { o.input.disabled = b; })
+  };
+}
+
+let uidCounter = 0;
+function uid() {
+  return 'wpfgrp' + (++uidCounter);
+}
