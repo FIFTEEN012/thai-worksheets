@@ -10,7 +10,7 @@
 window.OPENWORKSHEETS_CONFIG = {
   appVersion: '1.36.1',
   // ฉบับภาษาไทย: วาง URL /exec ของ Google Apps Script ของคุณเองที่นี่ (ดู gas/README.md)
-  gasUrl: '',
+  gasUrl: 'https://script.google.com/macros/s/AKfycbzEO0qV1OIsDRVctRrAu2eck4ZcHqtwsjhYiRT6uQnmbqDlkEz_pfOqbsyErak48x8K/exec',
   corsProxies: [
     { url: 'https://corsproxy.io/?', encode: true },
     { url: 'https://cors.eu.org/', encode: false }
