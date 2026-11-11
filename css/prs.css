@@ -59,8 +59,11 @@ a { color: var(--prs-blue-dark); }
 
 /* ---------- แถบบน ---------- */
 .topbar {
-  background: rgba(255, 255, 255, 0.92) !important;
-  backdrop-filter: saturate(1.4) blur(10px);
+  background: #FFFFFF !important;
+  /* อยู่ชั้นบนสุดเสมอ เพื่อให้เมนูที่เด้งลงมา (ไฟล์/แก้ไข/เครื่องมือ) ไม่ถูกพื้นที่ทำงานบัง
+     (ห้ามใส่ backdrop-filter: จะขังเมนูไว้ในชั้นของแถบบน) */
+  position: relative;
+  z-index: 200;
   color: var(--prs-ink) !important;
   border-bottom: 2px solid var(--prs-line) !important;
   box-shadow: none !important;
