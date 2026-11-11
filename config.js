@@ -9,7 +9,8 @@
 // si falla por CORS, recurre a proxies CORS públicos (menos fiables).
 window.OPENWORKSHEETS_CONFIG = {
   appVersion: '1.36.1',
-  gasUrl: 'https://script.google.com/macros/s/AKfycbxTxNMhU6DsxfnwbtqfLzafj9AvMDYMyDG0qd03vKW8M2grSpZtsjerwO5NtxeWCWbI/exec',
+  // ฉบับภาษาไทย: วาง URL /exec ของ Google Apps Script ของคุณเองที่นี่ (ดู gas/README.md)
+  gasUrl: '',
   corsProxies: [
     { url: 'https://corsproxy.io/?', encode: true },
     { url: 'https://cors.eu.org/', encode: false }
@@ -47,6 +48,9 @@ window.OPENWORKSHEETS_CONFIG = {
     host.endsWith('.local') ||
     host.endsWith('.localhost');
 
+  // ฉบับภาษาไทย: ถ้าใส่ URL ของตัวเองแล้ว (ไม่ใช่ของผู้พัฒนาต้นฉบับ) ให้ใช้ได้ทุกโดเมน
+  const AUTHOR_GAS_URL = 'https://script.google.com/macros/s/AKfycbxTxNMhU6DsxfnwbtqfLzafj9AvMDYMyDG0qd03vKW8M2grSpZtsjerwO5NtxeWCWbI/exec';
+  if (cfg.gasUrl && cfg.gasUrl !== AUTHOR_GAS_URL) return;
   if (isOfficial || isLocal) return;
 
   // Despliegue en un dominio ajeno: no usar el GAS del autor.
@@ -54,7 +58,7 @@ window.OPENWORKSHEETS_CONFIG = {
   cfg.foreignDeployment = true;
 
   const DOCS_URL =
-    'https://github.com/openworksheets/openworksheets.github.io/blob/main/gas/README.md';
+    'https://github.com/FIFTEEN012/thai-worksheets/blob/main/gas/README.th.md';
 
   // Traducciones del aviso, en los mismos idiomas que el resto de la aplicación.
   // No se puede importar el sistema i18n (config.js es un script plano que se
