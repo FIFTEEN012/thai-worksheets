@@ -43,6 +43,7 @@ import { takeFile } from './filehandoff.js';
 import { layoutFields } from './aiimport.js';
 import { classList, siteApiUrl } from './onlinesubmit.js';
 import { openAiDialog } from './aiui.js';
+import { openAiGenerateDialog, openGraphicsDialog } from './aigen.js';
 import { openMcpDialog } from './mcpui.js';
 
 applyI18n();
@@ -6160,6 +6161,38 @@ function startWithAi() {
 fileMenuItem('#miBlank', startBlank);
 fileMenuItem('#miIA', startWithAi);
 fileMenuItem('#miMcp', () => openMcpDialog());
+
+// ---------- ฉบับภาษาไทย: AI สร้างใบงานบนเว็บ และคลังกราฟิก ----------
+function openAiGen() {
+  openAiGenerateDialog({
+    onOpen: d => {
+      if (!confirmDiscardCurrent()) return;
+      state.dirty = false;
+      location.href = d.editorLink;
+    }
+  });
+}
+function insertGraphic({ blob, ext, ratio }) {
+  if (!state.manifest.pages.length) addBlankPage(undefined, { newSheet: true });
+  setTimeout(() => {
+    const pi = currentPageIndex();
+    const page = state.manifest.pages[pi];
+    if (!page) return;
+    const path = 'images/' + uid() + '.' + (ext || 'png');
+    state.files.set(path, blob);
+    const pageRatio = (page.w || 1600) / (page.h || 2263);
+    const w = ratio < 0.3 ? 0.6 : ratio < 0.8 ? 0.34 : 0.2;
+    const h = Math.min(0.6, w * (ratio || 0.75) * pageRatio);
+    const field = { id: uid('f'), type: 'image', rect: { x: (1 - w) / 2, y: 0.2, w, h }, points: 0, fontScale: 1, config: { src: path } };
+    page.fields.push(field);
+    markDirty();
+    renderCanvas();
+    selectField(pi, field.id);
+    toast(t('toast.imgInserted'), 'ok');
+  }, state.manifest.pages.length ? 0 : 400);
+}
+$('#btnAiGen')?.addEventListener('click', openAiGen);
+$('#btnGraphics')?.addEventListener('click', () => openGraphicsDialog({ onPick: insertGraphic }));
 fileMenuItem('#miNuevo', () => openStartDialog());
 
 fileMenuItem('#miAddPdf', startWithPdf);

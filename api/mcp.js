@@ -2,7 +2,7 @@
 // URL สำหรับเพิ่มเป็น connector: https://<เว็บ>/mcp/<กุญแจ MCP ของครู>
 // (vercel.json เขียนทางให้ /mcp/<key> → /api/mcp?key=<key>; หรือส่ง Authorization: Bearer <key>)
 import { sql, cors, readJson, teacherByMcpKey, siteOrigin, rowToResult } from './_lib/core.js';
-import { buildWorksheet } from './_lib/build.js';
+import { buildWorksheet, THEMES, graphicsIndex } from './_lib/build.js';
 
 const SERVER_INFO = { name: 'thai-worksheets', title: 'ใบงานออนไลน์ภาษาไทย', version: '1.0.0' };
 const PROTOCOLS = ['2025-06-18', '2025-03-26', '2024-11-05'];
@@ -26,13 +26,19 @@ const ITEM_DOC = `Each item is one of (use exactly these keys):
 { "type": "table", "prompt": "optional", "colHeaders": ["C1", "C2"], "rowHeaders": ["R1", "R2"], "rows": [["ans|alt", "c12"], ["c21", "c22"]] }
 { "type": "match", "prompt": "Question", "pairs": [{ "left": "A", "right": "1" }], "distractors": ["extra"] }
 { "type": "order", "prompt": "Question", "items": ["first", "second", "third"] }
-Rules: "correct" indexes start at 0; in "multi" it is always a list; in "gaps" every blank is in [ ] with alternatives separated by |; "order" items are given in the CORRECT order (they are shuffled for students). Start with a "label" for the title. Vary question types, make distractors plausible, keep text answers to 1–3 words, use "essay" at most once or twice. Thai text answers ignore spacing between Thai words automatically.`;
+Rules: "correct" indexes start at 0; in "multi" it is always a list; in "gaps" every blank is in [ ] with alternatives separated by |; "order" items are given in the CORRECT order (they are shuffled for students). Do NOT repeat the title as a label and do NOT number prompts: the design adds a header banner and number badges. Group questions into parts with "label" headings. Vary question types, make distractors plausible, keep text answers to 1–3 words, use "essay" at most once or twice. Thai text answers ignore spacing between Thai words automatically.
+
+Pictures: { "type": "image", "src": "<illustration id>" | "lib:<sticker id>", "width": 0.12-0.6, "align": "center" | "left" | "right" }
+Draw 1-3 original illustrations in "illustrations" when they help: flat, colorful, child-friendly SVG, viewBox about 400x260, simple shapes, no <text>, no external images or scripts, under 6000 characters each.`;
+
+const THEME_DOC = () => Object.entries(THEMES).map(([id, t]) => `${id} (${t.name})`).join(', ');
+const STICKER_DOC = () => graphicsIndex().filter(g => g.category === 'sticker').map(g => g.id).join(', ');
 
 const TOOLS = [
   {
     name: 'create_worksheet',
     title: 'สร้างใบงาน',
-    description: 'Create a self-grading online worksheet (Thai by default) and return a student link to share. Scores from students are saved to this teacher\'s account automatically.\n\n' + ITEM_DOC,
+    description: 'Create a self-grading online worksheet (Thai by default) and return a student link to share. Scores from students are saved to this teacher\'s account automatically.\n\n' + ITEM_DOC + '\nStickers for lib: ' + STICKER_DOC(),
     inputSchema: {
       type: 'object',
       properties: {
@@ -40,6 +46,8 @@ const TOOLS = [
         instructions: { type: 'string', description: 'Instructions shown to students before they start (optional)' },
         author: { type: 'string', description: 'Teacher name shown on the worksheet (optional)' },
         classes: { type: 'array', items: { type: 'string' }, description: 'Class list students must pick from, e.g. ["ม.1/1","ม.1/2"] (optional; empty = students type it)' },
+        theme: { type: 'string', description: 'Visual theme: ' + THEME_DOC() + '. Pick one that suits the subject and age (default clean).' },
+        illustrations: { type: 'array', description: 'Original SVG illustrations referenced by image items: [{ "id": "ill1", "alt": "...", "svg": "<svg ...>" }]', items: { type: 'object', properties: { id: { type: 'string' }, alt: { type: 'string' }, svg: { type: 'string' } }, required: ['id', 'svg'] } },
         items: { type: 'array', items: { type: 'object' }, description: 'Questions and texts, see the item formats in the tool description' }
       },
       required: ['title', 'items']
@@ -114,9 +122,9 @@ async function callTool(name, args, teacher, origin) {
     const lines = [
       `สร้างใบงาน «${built.manifest.title}» แล้ว (${built.fields} ช่อง, ${built.manifest.pages.length} หน้า)`,
       `ลิงก์สำหรับนักเรียน: ${link}`,
-      `แก้ไขในตัวแก้ไข: ${origin}/editor.html?ejemplo=${encodeURIComponent(`${origin}/api/worksheet?id=${built.id}&pkg=1`)}`,
+      `แก้ไขในตัวแก้ไข: ${origin}/editor.html?ejemplo=${encodeURIComponent(`api/worksheet?id=${built.id}&pkg=1`)}`,
       `ดูคะแนน: ${origin}/resultados.html`,
-      `worksheet_id: ${built.id}`,
+      `worksheet_id: ${built.id} · ธีม: ${built.theme}`,
       classes.length ? `ห้องเรียนที่ให้นักเรียนเลือก: ${classes.join(', ')}` : 'นักเรียนจะพิมพ์ห้องเอง (ไม่ได้กำหนดรายชื่อห้อง)'
     ];
     if (built.warnings.length) lines.push('คำเตือน: ' + built.warnings.join(' / '));

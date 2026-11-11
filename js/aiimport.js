@@ -200,7 +200,7 @@ export function parseImport(raw) {
     if (!it || typeof it !== 'object' || !it.type) {
       errors.push(`${where}: sin «type».`); return;
     }
-    if (!AI_TYPES.includes(it.type)) {
+    if (!AI_TYPES.includes(it.type) && !EXTRA_TYPES.includes(it.type)) {
       errors.push(`${where}: tipo desconocido «${it.type}».`); return;
     }
     const e = validateItem(it, where);
@@ -219,6 +219,9 @@ export function parseImport(raw) {
   };
 }
 
+// ฉบับภาษาไทย: ชนิดเพิ่มเติมที่สร้างจากเซิร์ฟเวอร์ (ภาพประกอบ, ช่องว่างสำหรับหัวกระดาษ)
+const EXTRA_TYPES = ['image', 'spacer'];
+
 function isStrArr(a) { return Array.isArray(a) && a.length > 0 && a.every(x => typeof x === 'string'); }
 
 // Comprueba los campos obligatorios de cada tipo. Devuelve lista de errores.
@@ -228,6 +231,10 @@ function validateItem(it, where) {
   switch (it.type) {
     case 'label':
       need(typeof it.text === 'string' && it.text.trim(), 'falta «text».'); break;
+    case 'image':
+      need(typeof it.src === 'string' && it.src.trim(), 'falta «src».'); break;
+    case 'spacer':
+      need(Number(it.height) > 0 && Number(it.height) < 0.5, '«height» debe estar entre 0 y 0.5.'); break;
     case 'text':
       need(isStrArr(it.answers), 'falta «answers» (lista de respuestas).'); break;
     case 'formula':
@@ -280,6 +287,17 @@ function itemToBlocks(it) {
   switch (it.type) {
     case 'label':
       blocks.push(labelBlock(it.text, { bold: looksLikeHeading(it.text) }));
+      break;
+    case 'image': {
+      const w = Math.min(0.84, Math.max(0.12, Number(it.width) || 0.36));
+      const h = Math.min(0.5, Math.max(0.05, Number(it.height) || w * 0.62));
+      const align = ['left', 'right', 'center'].includes(it.align) ? it.align : 'center';
+      const x = align === 'left' ? 0.08 : align === 'right' ? 0.92 - w : (1 - w) / 2;
+      blocks.push({ type: 'image', width: w, height: h, x, config: { src: String(it.src), alt: String(it.alt || '') } });
+      break;
+    }
+    case 'spacer':
+      blocks.push({ type: 'spacer', width: 0, height: Number(it.height) });
       break;
     case 'text':
       addPrompt();
@@ -397,11 +415,12 @@ export function layoutFields(items) {
       current = [];
       y = MARGIN_TOP;
     }
+    if (b.type === 'spacer') { y += b.height; continue; }
     const w = Math.min(b.width, 1 - 2 * MARGIN_X);
     current.push({
       id: uid('f'),
       type: b.type,
-      rect: { x: MARGIN_X, y, w, h: b.height },
+      rect: { x: b.x ?? MARGIN_X, y, w, h: b.height },
       points: isDecor(b.type) ? 0 : 1,
       fontScale: 1,
       config: b.config
@@ -413,4 +432,4 @@ export function layoutFields(items) {
   return pages.length ? pages : [[]];
 }
 
-function isDecor(type) { return type === 'label'; }
+function isDecor(type) { return type === 'label' || type === 'image'; }

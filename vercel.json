@@ -5,10 +5,11 @@
     { "source": "/mcp/:key", "destination": "/api/mcp?key=:key" }
   ],
   "functions": {
-    "api/mcp.js": { "includeFiles": "js/**", "maxDuration": 30 }
+    "api/mcp.js": { "includeFiles": "{js,graphics}/**", "maxDuration": 60 },
+    "api/generate.js": { "includeFiles": "{js,graphics}/**", "maxDuration": 300 }
   },
   "headers": [
     { "source": "/(.*)", "headers": [{ "key": "X-Content-Type-Options", "value": "nosniff" }] },
-    { "source": "/(js|css|fonts|vendor)/(.*)", "headers": [{ "key": "Cache-Control", "value": "public, max-age=300" }] }
+    { "source": "/(js|css|fonts|vendor|graphics)/(.*)", "headers": [{ "key": "Cache-Control", "value": "public, max-age=300" }] }
   ]
 }

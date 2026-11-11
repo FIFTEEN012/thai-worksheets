@@ -86,6 +86,8 @@ export async function loadZipSafely(data) {
   return { zip, track };
 }
 
+const IMAGE_TYPES = { svg: 'image/svg+xml', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', gif: 'image/gif' };
+
 export async function importFichaZip(data) {
   const { zip, track } = await loadZipSafely(data);
   const manifestFile = zip.file('manifest.json');
@@ -105,7 +107,10 @@ export async function importFichaZip(data) {
     if (!entry.dir && path !== 'manifest.json' && safeZipPath(path)) entries.push({ path, entry });
   });
   for (const { path, entry } of entries) {
-    const blob = await entry.async('blob');
+    let blob = await entry.async('blob');
+    // ฉบับภาษาไทย: ไฟล์ภาพต้องมี MIME type (โดยเฉพาะ SVG ที่ไม่แสดงถ้าไม่มี)
+    const imgType = IMAGE_TYPES[(path.match(/\.([a-z0-9]+)$/i) || [])[1]?.toLowerCase()];
+    if (imgType && !blob.type) blob = new Blob([blob], { type: imgType });
     track(blob.size);
     files.set(path, blob);
   }

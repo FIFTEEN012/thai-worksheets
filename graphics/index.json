@@ -1,0 +1,198 @@
+[
+  {
+    "id": "star",
+    "name": "ดาว",
+    "category": "sticker",
+    "file": "graphics/star.svg",
+    "ratio": 1
+  },
+  {
+    "id": "sun",
+    "name": "ดวงอาทิตย์",
+    "category": "sticker",
+    "file": "graphics/sun.svg",
+    "ratio": 1
+  },
+  {
+    "id": "planet",
+    "name": "ดาวเคราะห์",
+    "category": "sticker",
+    "file": "graphics/planet.svg",
+    "ratio": 1
+  },
+  {
+    "id": "rocket",
+    "name": "จรวด",
+    "category": "sticker",
+    "file": "graphics/rocket.svg",
+    "ratio": 1
+  },
+  {
+    "id": "leaf",
+    "name": "ใบไม้",
+    "category": "sticker",
+    "file": "graphics/leaf.svg",
+    "ratio": 1
+  },
+  {
+    "id": "flower",
+    "name": "ดอกไม้",
+    "category": "sticker",
+    "file": "graphics/flower.svg",
+    "ratio": 1
+  },
+  {
+    "id": "tree",
+    "name": "ต้นไม้",
+    "category": "sticker",
+    "file": "graphics/tree.svg",
+    "ratio": 1
+  },
+  {
+    "id": "book",
+    "name": "หนังสือ",
+    "category": "sticker",
+    "file": "graphics/book.svg",
+    "ratio": 1
+  },
+  {
+    "id": "pencil",
+    "name": "ดินสอ",
+    "category": "sticker",
+    "file": "graphics/pencil.svg",
+    "ratio": 1
+  },
+  {
+    "id": "lightbulb",
+    "name": "หลอดไฟ (ไอเดีย)",
+    "category": "sticker",
+    "file": "graphics/lightbulb.svg",
+    "ratio": 1
+  },
+  {
+    "id": "trophy",
+    "name": "ถ้วยรางวัล",
+    "category": "sticker",
+    "file": "graphics/trophy.svg",
+    "ratio": 1
+  },
+  {
+    "id": "check",
+    "name": "เครื่องหมายถูก",
+    "category": "sticker",
+    "file": "graphics/check.svg",
+    "ratio": 1
+  },
+  {
+    "id": "heart",
+    "name": "หัวใจ",
+    "category": "sticker",
+    "file": "graphics/heart.svg",
+    "ratio": 1
+  },
+  {
+    "id": "globe",
+    "name": "ลูกโลก",
+    "category": "sticker",
+    "file": "graphics/globe.svg",
+    "ratio": 1
+  },
+  {
+    "id": "cloud",
+    "name": "ก้อนเมฆ",
+    "category": "sticker",
+    "file": "graphics/cloud.svg",
+    "ratio": 0.6
+  },
+  {
+    "id": "apple",
+    "name": "แอปเปิล",
+    "category": "sticker",
+    "file": "graphics/apple.svg",
+    "ratio": 1
+  },
+  {
+    "id": "music",
+    "name": "ตัวโน้ตดนตรี",
+    "category": "sticker",
+    "file": "graphics/music.svg",
+    "ratio": 1
+  },
+  {
+    "id": "magnifier",
+    "name": "แว่นขยาย",
+    "category": "sticker",
+    "file": "graphics/magnifier.svg",
+    "ratio": 1
+  },
+  {
+    "id": "owl",
+    "name": "นกฮูก (ครู)",
+    "category": "sticker",
+    "file": "graphics/owl.svg",
+    "ratio": 1
+  },
+  {
+    "id": "ribbon",
+    "name": "ริบบิ้นหัวเรื่อง",
+    "category": "banner",
+    "file": "graphics/ribbon.svg",
+    "ratio": 0.2
+  },
+  {
+    "id": "speech",
+    "name": "กล่องคำพูด",
+    "category": "banner",
+    "file": "graphics/speech.svg",
+    "ratio": 0.6
+  },
+  {
+    "id": "note",
+    "name": "กระดาษโน้ต",
+    "category": "banner",
+    "file": "graphics/note.svg",
+    "ratio": 0.8
+  },
+  {
+    "id": "badge",
+    "name": "ป้ายเหรียญรางวัล",
+    "category": "banner",
+    "file": "graphics/badge.svg",
+    "ratio": 1.2
+  },
+  {
+    "id": "divider-dots",
+    "name": "เส้นคั่นจุด",
+    "category": "decor",
+    "file": "graphics/divider-dots.svg",
+    "ratio": 0.05
+  },
+  {
+    "id": "divider-wave",
+    "name": "เส้นคั่นคลื่น",
+    "category": "decor",
+    "file": "graphics/divider-wave.svg",
+    "ratio": 0.075
+  },
+  {
+    "id": "thai-pattern",
+    "name": "ลายกนกไทย",
+    "category": "decor",
+    "file": "graphics/thai-pattern.svg",
+    "ratio": 0.1
+  },
+  {
+    "id": "corner-stars",
+    "name": "มุมดาวระยิบ",
+    "category": "decor",
+    "file": "graphics/corner-stars.svg",
+    "ratio": 1
+  },
+  {
+    "id": "frame",
+    "name": "กรอบมุมโค้ง",
+    "category": "decor",
+    "file": "graphics/frame.svg",
+    "ratio": 0.667
+  }
+]
