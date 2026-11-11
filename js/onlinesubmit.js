@@ -6,8 +6,12 @@
 
 export function onlineSubmitConfig(manifest) {
   const cfg = manifest?.settings?.onlineSubmit || {};
-  const url = cfg.url || window.OPENWORKSHEETS_CONFIG?.gasUrl || '';
-  return { enabled: Boolean(cfg.enabled) && Boolean(url), url, classes: classList(cfg.classes) };
+  const siteGas = window.OPENWORKSHEETS_CONFIG?.gasUrl || '';
+  const url = cfg.url || siteGas;
+  // ค่าเริ่มต้น: ถ้าใบงานไม่ได้กำหนดไว้ (เช่น ใบงานเก่า) และเว็บตั้งค่า Apps Script แล้ว ให้ส่งคะแนนเลย
+  // ครูปิดได้ที่ ตั้งค่า → การตรวจ (จะบันทึก enabled: false ไว้ในใบงาน)
+  const enabled = cfg.enabled === undefined ? Boolean(siteGas) : Boolean(cfg.enabled);
+  return { enabled: enabled && Boolean(url), url, classes: classList(cfg.classes) };
 }
 
 export function classList(raw) {

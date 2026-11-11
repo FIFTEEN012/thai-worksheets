@@ -5218,7 +5218,7 @@ function openSettings(afterSave, initialTab = 'basic') {
   $('#ajIntentos').value = String(state.manifest.settings.maxAttempts || 0);
   // ฉบับภาษาไทย: ส่งคะแนนออนไลน์และรายชื่อห้อง
   const onl = state.manifest.settings.onlineSubmit || {};
-  $('#ajOnline').checked = Boolean(onl.enabled);
+  $('#ajOnline').checked = onl.enabled === undefined ? Boolean(window.OPENWORKSHEETS_CONFIG?.gasUrl) : Boolean(onl.enabled);
   $('#ajClases').value = classList(onl.classes).join('\n');
   $('#ajOnlineNoGas').hidden = Boolean(window.OPENWORKSHEETS_CONFIG?.gasUrl || onl.url);
   $('#ajCifrarEntregas').checked = state.manifest.settings.encryptSubmissions === true;
