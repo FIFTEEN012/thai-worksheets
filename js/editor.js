@@ -3129,7 +3129,7 @@ function renderAmItemPanel(field) {
 
 // Editor genérico de listas de opciones.
 function optionListEditor(cont, {
-  label, items, render, add, remove, addLabel = '+ Añadir', min = 1
+  label, items, render, add, remove, addLabel = '+ เพิ่ม', min = 1
 }) {
   if (label) cont.appendChild(el('label', { class: 'f-label' }, label));
   const list = el('div', { class: 'opt-list' });
@@ -3139,7 +3139,7 @@ function optionListEditor(cont, {
       const row = el('div', { class: 'opt-row' });
       render(row, item, i, paint);
       if (items().length > min) {
-        const del = el('button', { class: 'opt-quitar', type: 'button', title: 'Quitar' }, '✕');
+        const del = el('button', { class: 'opt-quitar', type: 'button', title: 'ลบ' }, '✕');
         del.addEventListener('click', () => { remove(i); markDirty(); paint(); });
         row.appendChild(del);
       }
@@ -5053,7 +5053,7 @@ function renderFieldList() {
     placeholder: t('dlg.search.placeholder'), value: _fieldListQuery,
     autocomplete: 'off', spellcheck: 'false'
   });
-  const clearBtn = el('button', { class: 'lista-campos-clear', type: 'button', 'aria-label': 'Borrar búsqueda', hidden: '' }, '✕');
+  const clearBtn = el('button', { class: 'lista-campos-clear', type: 'button', 'aria-label': 'ล้างคำค้นหา', hidden: '' }, '✕');
   clearBtn.addEventListener('click', () => {
     filterInput.value = '';
     _fieldListQuery = '';
